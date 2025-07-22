@@ -1,5 +1,7 @@
 # vactor
 
+[简体中文文档 (Chinese README)](ReadmeCh.md)
+
 dvactor is a distributed extension of [vactor](https://github.com/kofplayer/vactor).
 
 ## Description
