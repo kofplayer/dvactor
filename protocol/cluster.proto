@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package protocol;
+option go_package = "github.com/kofplayer/dvactor/protocol";
+
+enum ErrorCode {
+  	ErrorCodeSuccess = 0;
+  	ErrorCodeNormal = 1;
+}
+
+enum PkgType {
+	PkgTypeNone = 0;
+	PkgTypeEnvelopeSend = 1;
+	PkgTypeEnvelopeBatchSend = 2;
+	PkgTypeEnvelopeRequestAsync = 3;
+	PkgTypeEnvelopeResponseAsync = 4;
+	PkgTypeEnvelopeRequest = 5;
+	PkgTypeEnvelopeResponse = 6;
+	PkgTypeEnvelopeWatch = 7;
+	PkgTypeEnvelopeNotify = 8;
+	PkgTypeEnvelopeFireNotify = 9;
+	PkgTypeRegisterSystemReq = 10;
+	PkgTypeRegisterSystemRsp = 11;
+}
+
+message Message {
+  	uint32 Type = 1;
+  	bytes Data = 2;
+}
+
+message ActorRef {
+	uint32 SystemId = 1;
+	uint32 GroupSlot = 2;
+	uint32 ActorType = 3;
+	string ActorId = 4;
+}
+
+message PkgEnvelopeSend {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef  = 2;
+  	Message Message = 3;
+}
+
+message PkgEnvelopeBatchSend {
+	ActorRef FromActorRef = 1;
+	repeated ActorRef ToActorRefs  = 2;
+  	repeated Message Messages = 3;
+}
+
+message PkgEnvelopeRequestAsync {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef = 2;
+	Message Message = 3;
+	uint32 CallbackId = 4;
+	uint64 CallbackAddress = 5;
+}
+
+message Response {
+	ErrorCode ErrorCode = 1;
+  	Message Message = 2;
+}
+
+message PkgEnvelopeResponseAsync {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef = 2;
+	Response Response = 3;
+	uint32 CallbackId = 4;
+	uint64 CallbackAddress = 5;
+}
+
+message PkgEnvelopeRequest {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef = 2;
+	Message Message = 3;
+}
+
+message PkgEnvelopeResponse {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef = 2;
+	Response Response = 3;
+}
+
+message PkgEnvelopeWatch {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef = 2;
+	uint32 WatchType = 3;
+	bool IsWatch = 4;
+}
+
+message PkgEnvelopeNotify {
+	ActorRef FromActorRef = 1;
+	repeated ActorRef ToActorRefs  = 2;
+	uint32 NotifyType = 3;
+	ActorRef ActorRef = 4;
+	uint32 WatchType = 5;
+	Message Message = 6;
+}
+
+message PkgEnvelopeFireNotify {
+	ActorRef FromActorRef = 1;
+	ActorRef ToActorRef  = 2;
+	uint32 NotifyType = 3;
+	uint32 WatchType = 4;
+	Message Message = 5;
+}
+
+message PkgRegisterSystemReq {
+	uint32 SystemId = 1;
+}
+
+message PkgRegisterSystemRsp {
+	ErrorCode ErrorCode = 1;
+}

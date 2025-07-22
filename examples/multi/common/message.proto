@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package message;
+option go_package = "github.com/kofplayer/dvactor/examples/multi/common";
+
+enum MessageType {
+    MessageTypeNone = 0;
+    MessageTypeTestMessage = 1;
+    MessageTypeTestReq = 2;
+    MessageTypeTestRsp = 3;
+}
+
+message TestMessage {
+    string msg = 1;
+}
+
+message TestReq {
+    string msg = 1;
+}
+
+message TestRsp {
+    string msg = 1;
+}
