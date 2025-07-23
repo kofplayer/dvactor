@@ -1,15 +1,19 @@
 # vactor
 
-dvactor 是 [vactor](https://github.com/kofplayer/vactor) 的一个分布式扩展。
+dvactor 是 [vactor](https://github.com/kofplayer/vactor) 的一个分布式扩展。能够把多个节点上的actor系统组成集群，协同工作。vactor所有功能在都能在分布式环境下使用。
 
-## 说明
+## 序列化
 
-- vactor所有功能在都能在分布式环境下使用。
-- 直接使用vactor的接口。vactor项目做很少修改就能支持分布式。
-- 给使用CreateActorRef方法创建的actor ref发送消息时系统会自动选择节点创建actor。
-- 给使用CreateActorRefEx方法创建的actor ref发送消息时系统会使用指定的节点。这时相同的type和id的actor可以同时存在多个节点上。
-- 同一类型的actor不要混用CreateActorRef和CreateActorRefEx。
 - 使用了protobuf作为消息序列化。所有自定义消息都需要使用proto定义的消息。
+
+## actor放置
+
+- 不指定SystemId的情况下(CreateActorRef)，系统会通过actor id的hash值选择支持的节点放置actor
+- 指定SystemId的情况下(CreateActorRefEx)，系统会把消息发送给System所在的节点。这样可能会出现相同type和id的actor，在多个节点中同时存在。
+
+## 集群拓扑
+
+- 集群中所有节点的拓扑配置在集群启动时确定，中途不能做修改。如果需要修改，就要先关闭整个集群。所以集群不支持运行时动态的添加和移除节点。
 
 ## 安装
 d
