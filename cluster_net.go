@@ -1,7 +1,6 @@
 package dvactor
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -118,28 +117,40 @@ func (cn *clusterNet) start() error {
 	return nil
 }
 
-func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte) error {
+func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte) vactor.VAError {
 	info := cn.systemInfos[systemId]
 	info.lock.RLock()
 	defer info.lock.RUnlock()
-	var err error
 	if info.passive {
 		if info.cli != nil {
-			err = info.cli.SendMessage(msgId, data)
+			err := info.cli.SendMessage(msgId, data)
+			if err != nil {
+				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
+				return vactor.NewVAError(ErrorCodeMessageSendFail)
+			}
 		} else {
-			err = fmt.Errorf("system %v disconnect", systemId)
+			err := fmt.Errorf("system %v disconnect", systemId)
+			if err != nil {
+				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
+				return vactor.NewVAError(ErrorCodeMessageSendFail)
+			}
 		}
 	} else {
 		if info.session != nil {
-			err = info.session.SendMessage(msgId, data)
+			err := info.session.SendMessage(msgId, data)
+			if err != nil {
+				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
+				return vactor.NewVAError(ErrorCodeMessageSendFail)
+			}
 		} else {
-			err = fmt.Errorf("system %v disconnect", systemId)
+			cn.localSystem.LogError("system %v disconnect", systemId)
+			return vactor.NewVAError(ErrorCodeMessageSendFail)
 		}
 	}
-	return err
+	return nil
 }
 
-func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) error {
+func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) vactor.VAError {
 	var msgId uint32
 	var pkg proto.Message
 
@@ -166,7 +177,8 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) e
 			messages = append(messages, msg)
 		}
 		if len(messages) <= 0 {
-			return errors.New("no valid message can send")
+			cn.localSystem.LogError("no valid message can send")
+			return vactor.NewVAError(ErrorCodeMessageLenError)
 		}
 		stringActorRefs := make([]*protocol.ActorRef, len(e.ToActorRefs))
 		for i, key := range e.ToActorRefs {
@@ -203,11 +215,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) e
 		if e.Error == nil {
 			rsp.ErrorCode = protocol.ErrorCode_ErrorCodeSuccess
 		} else {
-			if realError, ok := e.Error.(Error); ok {
-				rsp.ErrorCode = protocol.ErrorCode(realError.GetCode())
-			} else {
-				rsp.ErrorCode = protocol.ErrorCode_ErrorCodeNormal
-			}
+			rsp.ErrorCode = protocol.ErrorCode(e.Error.Code())
 		}
 		pkg = &protocol.PkgEnvelopeResponseAsync{
 			FromActorRef:    ActorRefToProto(e.FromActorRef),
@@ -239,11 +247,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) e
 		if e.Error == nil {
 			rsp.ErrorCode = protocol.ErrorCode_ErrorCodeSuccess
 		} else {
-			if realError, ok := e.Error.(Error); ok {
-				rsp.ErrorCode = protocol.ErrorCode(realError.GetCode())
-			} else {
-				rsp.ErrorCode = protocol.ErrorCode_ErrorCodeNormal
-			}
+			rsp.ErrorCode = protocol.ErrorCode(e.Error.Code())
 		}
 		pkg = &protocol.PkgEnvelopeResponse{
 			FromActorRef: ActorRefToProto(e.FromActorRef),
@@ -290,11 +294,12 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) e
 			Message:      msg,
 		}
 	default:
-		return errors.New("unknown envelope type")
+		cn.localSystem.LogError("unknown envelope type")
+		return vactor.NewVAError(ErrorCodeUnknownEnvelope)
 	}
 	data, err := proto.Marshal(pkg)
 	if err != nil {
-		return err
+		return vactor.NewVAError(ErrorCodeMessageSerializeFail)
 	}
 	return cn.doSend(systemId, msgId, data)
 }
@@ -376,7 +381,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Response: &vactor.Response{
-				Error:   NewError(int32(pkg.Response.ErrorCode)),
+				Error:   vactor.NewVAError(vactor.ErrorCode(pkg.Response.ErrorCode)),
 				Message: msg,
 			},
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
@@ -416,7 +421,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Response: &vactor.Response{
-				Error:   NewError(int32(pkg.Response.ErrorCode)),
+				Error:   vactor.NewVAError(vactor.ErrorCode(pkg.Response.ErrorCode)),
 				Message: msg,
 			},
 		}

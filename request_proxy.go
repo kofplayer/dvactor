@@ -28,7 +28,7 @@ type OuterRequest struct {
 func (rp *RequestProxy) OnMessage(ctx vactor.EnvelopeContext) {
 	switch m := ctx.GetMessage().(type) {
 	case *OuterRequest:
-		ctx.RequestAsync(m.ToActorRef, m.Message, 0, func(msg interface{}, err error) {
+		ctx.RequestAsync(m.ToActorRef, m.Message, 0, func(msg interface{}, err vactor.VAError) {
 			m.RspChan <- &vactor.Response{
 				Error:   err,
 				Message: msg,

@@ -13,32 +13,6 @@ import (
 
 const ActorTypeStart vactor.ActorType = vactor.ActorTypeStart + 10
 
-type Error interface {
-	error
-	GetCode() int32
-}
-
-func NewError(code int32) Error {
-	if code == 0 {
-		return nil
-	}
-	return &gacError{
-		code: code,
-	}
-}
-
-type gacError struct {
-	code int32
-}
-
-func (e *gacError) Error() string {
-	return ""
-}
-
-func (e *gacError) GetCode() int32 {
-	return e.code
-}
-
 type ClusterSystem interface {
 	vactor.System
 	RegisterMessageType(msgType uint32, creator func() proto.Message)
@@ -105,18 +79,21 @@ func (s *system) RegisterMessageType(msgType uint32, creator func() proto.Messag
 	s.msgCreators[msgType] = creator
 }
 
-func (s *system) MarshalMessage(msg interface{}) (*protocol.Message, error) {
+func (s *system) MarshalMessage(msg interface{}) (*protocol.Message, vactor.VAError) {
 	protoMsg, ok := msg.(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("msg %v is not proto message", reflect.TypeOf(msg))
+		s.LogError("msg %v is not proto message", reflect.TypeOf(msg))
+		return nil, vactor.NewVAError(ErrorCodeMessageCannotSerialize)
 	}
 	msgType, ok := s.msgTypeIds[reflect.TypeOf(msg)]
 	if !ok {
-		return nil, errors.New("can not find msg type")
+		s.LogError("can not find msg type")
+		return nil, vactor.NewVAError(ErrorCodeMessageNotRegister)
 	}
 	_data, err := proto.Marshal(protoMsg)
 	if err != nil {
-		return nil, err
+		s.LogError("proto.Marshal %v", err)
+		return nil, vactor.NewVAError(ErrorCodeMessageSerializeFail)
 	}
 	data := make([]byte, 4, 4+len(_data))
 	binary.BigEndian.PutUint32(data[:4], msgType)

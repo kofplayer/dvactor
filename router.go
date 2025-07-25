@@ -70,8 +70,8 @@ func (r *Router) CreateActorRefEx(systemId vactor.SystemId, actorType vactor.Act
 	return ref
 }
 
-func (r *Router) Router(envelope vactor.Envelope) error {
-	var err error
+func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
+	var err vactor.VAError
 	switch e := envelope.(type) {
 	case *vactor.EnvelopeBatchSend:
 		groups := make(map[vactor.SystemId][]vactor.ActorRef)
