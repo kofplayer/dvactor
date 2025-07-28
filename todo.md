@@ -1,3 +1,1 @@
-统一日志
 system断开重连后watchProxy，根据情况需要去刷新watch
-写readme

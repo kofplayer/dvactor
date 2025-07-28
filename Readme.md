@@ -1,4 +1,4 @@
-[简体中文文档 (Chinese README)](ReadmeCh.md)
+[简体中文文档](ReadmeCh.md)
 
 # vactor
 

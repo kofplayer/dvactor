@@ -8,6 +8,10 @@ github.com/kofplayer/vactor v0.0.0-20250722170858-1e5ce0b666e5 h1:zDOg8D1yQhgfbF
 github.com/kofplayer/vactor v0.0.0-20250722170858-1e5ce0b666e5/go.mod h1:zR079dsxhzJmLHE+nqAGM7i0aFGoIl1F0/Lw8o9LfRo=
 github.com/kofplayer/vactor v0.0.0-20250725085416-4378b41ed883 h1:oul8/p26m25IXzjiOvYC68rgoyvhnbAw49y0ssck2yw=
 github.com/kofplayer/vactor v0.0.0-20250725085416-4378b41ed883/go.mod h1:zR079dsxhzJmLHE+nqAGM7i0aFGoIl1F0/Lw8o9LfRo=
+github.com/kofplayer/vactor v0.0.0-20250725095625-be6201417ab3 h1:Ah9KfzHIDgwkOR1ihSRIte+vvIAD7mXVRvYrXBUAzXc=
+github.com/kofplayer/vactor v0.0.0-20250725095625-be6201417ab3/go.mod h1:zR079dsxhzJmLHE+nqAGM7i0aFGoIl1F0/Lw8o9LfRo=
+github.com/kofplayer/vactor v0.0.0-20250728062035-3f68b062feaa h1:jpzCEW809s4aNvt5VCeEEEvy918D3tqiPn9YeaqJ4eU=
+github.com/kofplayer/vactor v0.0.0-20250728062035-3f68b062feaa/go.mod h1:zR079dsxhzJmLHE+nqAGM7i0aFGoIl1F0/Lw8o9LfRo=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 h1:E7g+9GITq07hpfrRu66IVDexMakfv52eLZ2CXBWiKr4=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 google.golang.org/protobuf v1.36.6 h1:z1NpPI8ku2WgiWnf+t9wTPsn6eP1L7ksHUlkfLvd9xY=
