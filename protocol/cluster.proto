@@ -3,9 +3,11 @@ syntax = "proto3";
 package protocol;
 option go_package = "github.com/kofplayer/dvactor/protocol";
 
+// 与 vactor.ErrorCode 对齐（线协议靠数值强转透传）
 enum ErrorCode {
   	ErrorCodeSuccess = 0;
-  	ErrorCodeNormal = 1;
+  	ErrorCodeTimeout = 1;
+  	ErrorCodeInvalidActor = 2;
 }
 
 enum PkgType {
@@ -72,12 +74,14 @@ message PkgEnvelopeRequest {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Message Message = 3;
+	uint32 RequestId = 4;
 }
 
 message PkgEnvelopeResponse {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Response Response = 3;
+	uint32 RequestId = 4;
 }
 
 message PkgEnvelopeWatch {

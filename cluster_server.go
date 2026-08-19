@@ -37,7 +37,7 @@ func (svr *clusterServer) OnDisconnect(s netSession.NetSession) {
 	s.SetBindObject(nil)
 	info.session = nil
 	atomic.AddInt32(&svr.cn.connectedSystemCount, -1)
-	fmt.Printf("system %v disconnected\n", info.config.SystemId)
+	svr.cn.localSystem.LogInfo("system %v disconnected", info.config.SystemId)
 }
 
 func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data []byte) error {
@@ -70,7 +70,7 @@ func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("system %v connected\n", req.SystemId)
+		svr.cn.localSystem.LogInfo("system %v connected", req.SystemId)
 		s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), data)
 		return nil
 	default:
@@ -82,7 +82,7 @@ func (svr *clusterServer) Start() error {
 	go func() {
 		err := svr.svr.Start()
 		if err != nil {
-			panic(err)
+			svr.cn.localSystem.LogError("cluster server start error: %v", err)
 		}
 	}()
 	return nil
@@ -104,7 +104,7 @@ func NewServer(cn *clusterNet) *clusterServer {
 	svr.svr.SetOnMessage(func(s netSession.NetSession, msgId uint32, data []byte) error {
 		err := svr.OnMessage(s, msgId, data)
 		if err != nil {
-			fmt.Println(err)
+			svr.cn.localSystem.LogError("on message error: %v", err)
 			s.Close()
 		}
 		return err

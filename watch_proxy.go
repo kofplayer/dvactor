@@ -118,7 +118,7 @@ func (wp *WatchProxy) updateInnerWatch(ctx vactor.EnvelopeContext, watchType vac
 			if _, ok := watchers[*w]; ok {
 				delete(watchers, *w)
 				if len(watchers) == 0 {
-					delete(wp.queuess, watchType)
+					delete(wp.watcherss, watchType)
 				}
 			}
 		}

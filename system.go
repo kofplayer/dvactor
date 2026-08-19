@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/kofplayer/dvactor/protocol"
 	"github.com/kofplayer/vactor"
@@ -51,6 +52,8 @@ type SystemConfig struct {
 type ClusterConfig struct {
 	LocalSystemId vactor.SystemId
 	SystemConfigs []*SystemConfig
+	// ConnectTimeout: 启动时等待集群全员互连的超时时间；0 表示无限等待（保持旧行为）。
+	ConnectTimeout time.Duration
 }
 
 type system struct {
@@ -63,7 +66,9 @@ type system struct {
 
 func (s *system) Start() {
 	s.System.Start()
-	s.clusterNet.start()
+	if err := s.clusterNet.start(); err != nil {
+		s.LogError("cluster net start failed: %v", err)
+	}
 }
 
 func (s *system) RegisterActorType(actorType vactor.ActorType, actorCreator func() vactor.Actor) {
@@ -75,7 +80,14 @@ func (s *system) RegisterActorType(actorType vactor.ActorType, actorCreator func
 
 func (s *system) RegisterMessageType(msgType uint32, creator func() proto.Message) {
 	msg := creator()
-	s.msgTypeIds[reflect.TypeOf(msg)] = msgType
+	msgReflectType := reflect.TypeOf(msg)
+	if old, ok := s.msgCreators[msgType]; ok && reflect.TypeOf(old()) != msgReflectType {
+		s.LogWarn("msgType %v re-registered: %v -> %v", msgType, reflect.TypeOf(old()), msgReflectType)
+	}
+	if oldType, ok := s.msgTypeIds[msgReflectType]; ok && oldType != msgType {
+		s.LogWarn("message %v re-registered with msgType %v (was %v)", msgReflectType, msgType, oldType)
+	}
+	s.msgTypeIds[msgReflectType] = msgType
 	s.msgCreators[msgType] = creator
 }
 

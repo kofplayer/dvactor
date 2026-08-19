@@ -1,7 +1,6 @@
 package dvactor
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -46,7 +45,7 @@ func (c *clusterClient) Start() {
 			cli.SetOnMessage(c.OnMessage)
 			c.cli = cli
 			if err := c.cli.Connect(); err != nil {
-				fmt.Printf("system %v connect err:%v, wait for retry\n", info.config.SystemId, err)
+				c.cn.localSystem.LogError("system %v connect err:%v, wait for retry", info.config.SystemId, err)
 				time.Sleep(time.Second * 5)
 				continue
 			}
@@ -77,10 +76,10 @@ func (c *clusterClient) Start() {
 
 			// ready
 			atomic.AddInt32(&c.cn.connectedSystemCount, 1)
-			fmt.Printf("system %v connected\n", info.config.SystemId)
+			c.cn.localSystem.LogInfo("system %v connected", info.config.SystemId)
 			<-c.disconnectChan
 
-			fmt.Printf("system %v disconnected\n", info.config.SystemId)
+			c.cn.localSystem.LogInfo("system %v disconnected", info.config.SystemId)
 			info.lock.Lock()
 			info.cli = nil
 			c.cli = nil

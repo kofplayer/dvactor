@@ -84,7 +84,7 @@ func (cn *clusterNet) start() error {
 	cn.localSystem.LogDebug("start cluster")
 	atomic.AddInt32(&cn.connectedSystemCount, 1)
 	if cn.localSystemIndex < cn.systemCount-1 {
-		fmt.Println("start server")
+		cn.localSystem.LogInfo("start server")
 		cn.server = NewServer(cn)
 		if err := cn.server.Start(); err != nil {
 			return err
@@ -99,21 +99,28 @@ func (cn *clusterNet) start() error {
 			}
 			client := NewClusterClient(cn, config.SystemId)
 			cn.clients[config.SystemId] = client
-			fmt.Printf("start client to %v\n", config.SystemId)
+			cn.localSystem.LogInfo("start client to %v", config.SystemId)
 			client.Start()
 		}
 	}
 
+	var deadline time.Time
+	if cn.clusterConfig.ConnectTimeout > 0 {
+		deadline = time.Now().Add(cn.clusterConfig.ConnectTimeout)
+	}
 	for {
 		connectedSystemCount := atomic.LoadInt32(&cn.connectedSystemCount)
 		if connectedSystemCount >= int32(cn.systemCount) {
 			break
 		}
-		fmt.Printf("wait connected %v/%v\n", connectedSystemCount, cn.systemCount)
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return fmt.Errorf("wait cluster connected timeout after %v (%v/%v)", cn.clusterConfig.ConnectTimeout, connectedSystemCount, cn.systemCount)
+		}
+		cn.localSystem.LogInfo("wait connected %v/%v", connectedSystemCount, cn.systemCount)
 		time.Sleep(time.Second * 3)
 	}
 
-	fmt.Println("start cluster success")
+	cn.localSystem.LogInfo("start cluster success")
 	return nil
 }
 
@@ -121,31 +128,23 @@ func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte
 	info := cn.systemInfos[systemId]
 	info.lock.RLock()
 	defer info.lock.RUnlock()
+	var err error
 	if info.passive {
 		if info.cli != nil {
-			err := info.cli.SendMessage(msgId, data)
-			if err != nil {
-				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
-				return vactor.NewVAError(ErrorCodeMessageSendFail)
-			}
-		} else {
-			err := fmt.Errorf("system %v disconnect", systemId)
-			if err != nil {
-				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
-				return vactor.NewVAError(ErrorCodeMessageSendFail)
-			}
+			err = info.cli.SendMessage(msgId, data)
 		}
 	} else {
 		if info.session != nil {
-			err := info.session.SendMessage(msgId, data)
-			if err != nil {
-				cn.localSystem.LogError("system %v send message error: %v", systemId, err)
-				return vactor.NewVAError(ErrorCodeMessageSendFail)
-			}
-		} else {
-			cn.localSystem.LogError("system %v disconnect", systemId)
-			return vactor.NewVAError(ErrorCodeMessageSendFail)
+			err = info.session.SendMessage(msgId, data)
 		}
+	}
+	if err != nil {
+		cn.localSystem.LogError("system %v send message error: %v", systemId, err)
+		return vactor.NewVAError(ErrorCodeMessageSendFail)
+	}
+	if (info.passive && info.cli == nil) || (!info.passive && info.session == nil) {
+		cn.localSystem.LogError("system %v disconnect", systemId)
+		return vactor.NewVAError(ErrorCodeMessageSendFail)
 	}
 	return nil
 }
@@ -234,6 +233,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef: ActorRefToProto(e.FromActorRef),
 			ToActorRef:   ActorRefToProto(e.ToActorRef),
 			Message:      msg,
+			RequestId:    uint32(e.RequestId),
 		}
 	case *vactor.EnvelopeResponse:
 		msg, err := cn.localSystem.MarshalMessage(e.Message)
@@ -253,6 +253,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef: ActorRefToProto(e.FromActorRef),
 			ToActorRef:   ActorRefToProto(e.ToActorRef),
 			Response:     rsp,
+			RequestId:    uint32(e.RequestId),
 		}
 	case *vactor.EnvelopeWatch:
 		msgId = uint32(protocol.PkgType_PkgTypeEnvelopeWatch)
@@ -381,7 +382,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Response: &vactor.Response{
-				Error:   vactor.NewVAError(vactor.ErrorCode(pkg.Response.ErrorCode)),
+				Error:   errorCodeToVAError(pkg.Response.ErrorCode),
 				Message: msg,
 			},
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
@@ -402,6 +403,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Message:      msg,
+			RequestId:    vactor.CallbackId(pkg.RequestId),
 		}
 		cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeResponse:
@@ -420,8 +422,9 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		e := &vactor.EnvelopeResponse{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			RequestId:    vactor.CallbackId(pkg.RequestId),
 			Response: &vactor.Response{
-				Error:   vactor.NewVAError(vactor.ErrorCode(pkg.Response.ErrorCode)),
+				Error:   errorCodeToVAError(pkg.Response.ErrorCode),
 				Message: msg,
 			},
 		}

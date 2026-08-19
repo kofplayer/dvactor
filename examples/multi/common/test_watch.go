@@ -20,13 +20,13 @@ func TestWatch(systemId vactor.SystemId) {
 				SystemId:   1,
 				Host:       "localhost",
 				Port:       8001,
-				ActorTypes: []vactor.ActorType{vactor.EventHubActorType, WatcherType, WatcheeType},
-			},
-			{
-				SystemId:   2,
-				Host:       "localhost",
-				Port:       8002,
-				ActorTypes: []vactor.ActorType{vactor.EventHubActorType, WatcheeType, WatcheeType},
+			ActorTypes: []vactor.ActorType{vactor.EventHubActorType, WatcherType, WatcheeType},
+		},
+		{
+			SystemId:   2,
+			Host:       "localhost",
+			Port:       8002,
+			ActorTypes: []vactor.ActorType{vactor.EventHubActorType, WatcherType, WatcheeType},
 			},
 		},
 	})

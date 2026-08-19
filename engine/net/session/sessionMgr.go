@@ -2,6 +2,7 @@ package netSession
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 func NewSessionMgr() SessionMgr {
@@ -20,14 +21,13 @@ type SessionMgr interface {
 type sessionMgr struct {
 	lock     sync.RWMutex
 	sessions map[SessionID]*netSession
-	genUId   SessionID
+	genUId   atomic.Uint32
 }
 
 func (m *sessionMgr) NewSession() NetSession {
 	v := new(netSession)
 	v.Init()
-	m.genUId++
-	v.id = m.genUId
+	v.id = SessionID(m.genUId.Add(1))
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.sessions[v.id] = v

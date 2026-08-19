@@ -57,7 +57,12 @@ func (r *Router) CreateActorRefEx(systemId vactor.SystemId, actorType vactor.Act
 	hash := uint32(hashs[3])<<24 | uint32(hashs[2])<<16 | uint32(hashs[1])<<8 | uint32(hashs[0])
 	systemCount := uint32(len(systemIds))
 	if ref.SystemId == 0 {
-		ref.SystemId = systemIds[hash%systemCount]
+		if systemCount == 0 {
+			r.system.LogError("actor type %v is not declared in any system config, fallback to local system %v", actorType, r.systemId)
+			ref.SystemId = r.systemId
+		} else {
+			ref.SystemId = systemIds[hash%systemCount]
+		}
 	}
 	if systemCount > 0 {
 		ref.GroupSlot = vactor.GroupSlot((hash/systemCount)&0xFFFF + 1)

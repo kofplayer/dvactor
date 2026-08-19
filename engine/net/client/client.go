@@ -1,8 +1,6 @@
 package client
 
 import (
-	"encoding/binary"
-
 	netConnect "github.com/kofplayer/dvactor/engine/net/connect"
 )
 
@@ -26,7 +24,7 @@ type netClient struct {
 	onConnect    func()
 	onDisconnect func()
 	onMessage    func(t uint32, data []byte) error
-	receiveData  []byte
+	splitter     netConnect.PacketSplitter
 }
 
 func (c *netClient) SetConnector(connector netConnect.Connector) {
@@ -57,26 +55,13 @@ func (c *netClient) Connect() error {
 		}
 	})
 	c.connector.SetOnData(func(data []byte) error {
-		// len(4) msgId(1) data
-		if c.receiveData == nil {
-			c.receiveData = data
-		} else {
-			c.receiveData = append(c.receiveData, data...)
-		}
+		c.splitter.Append(data)
 		for {
-			l := uint32(len(c.receiveData))
-			if l < 5 {
+			msgId, payload, ok := c.splitter.Next()
+			if !ok {
 				return nil
 			}
-			dataLen := binary.BigEndian.Uint32(c.receiveData[0:4])
-			msgLen := dataLen + 5
-			if l < msgLen {
-				return nil
-			}
-			t := uint32(c.receiveData[4])
-			_data := c.receiveData[5:msgLen]
-			c.onMessage(t, _data)
-			c.receiveData = c.receiveData[msgLen:]
+			c.onMessage(msgId, payload)
 		}
 	})
 	return c.connector.Connect()
@@ -87,10 +72,9 @@ func (c *netClient) Disconnect() error {
 }
 
 func (c *netClient) SendMessage(msgId uint32, data []byte) error {
-	l := len(data)
-	_data := make([]byte, 5, l+5)
-	binary.BigEndian.PutUint32(_data[:4], uint32(l))
-	_data[4] = uint8(msgId)
-	_data = append(_data, data...)
-	return c.connector.SendData(_data)
+	pkt, err := netConnect.PackMessage(msgId, data)
+	if err != nil {
+		return err
+	}
+	return c.connector.SendData(pkt)
 }
