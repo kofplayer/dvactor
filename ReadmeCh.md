@@ -1,4 +1,6 @@
-# vactor
+[English Documents](Readme.md)
+
+# dvactor
 
 dvactor 是 [vactor](https://github.com/kofplayer/vactor) 的一个分布式扩展。能够把多个节点上的actor系统组成集群，协同工作。vactor所有功能在都能在分布式环境下使用。
 

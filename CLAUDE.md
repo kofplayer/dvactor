@@ -20,6 +20,7 @@
 - 节点断线后 client 侧自动退避重连；重连成功后 WatchProxy 自动刷新 watch（分区期间丢失的订阅自愈，机制见 [docs/proxies.md](docs/proxies.md)）。
 - `Stop()` 先关集群网络（终止重连、关闭监听与会话）再停 actor 层，幂等、有限时间内返回。
 - 跨节点信封的 `Message` 允许为 nil（"只回错误"的响应可正常跨节点）。
+- **SystemId 越界（集群版）**：向**未在 `ClusterConfig.SystemConfigs` 中声明**的 SystemId 发消息，`clusterNet.doSend` 返回 `ErrorCodeUnknownSystem`(107)（此前是空指针 panic——在 main/业务 goroutine 触发会直接杀进程）。`CreateActorRefEx` 会无条件按传入的 systemId 建引用，合法性由调用方保证。
 
 ## 文件地图
 

@@ -1,6 +1,6 @@
 [简体中文文档](ReadmeCh.md)
 
-# vactor
+# dvactor
 
 dvactor is a distributed extension of [vactor](https://github.com/kofplayer/vactor). It enables actor systems on multiple nodes to form a cluster and work together. All vactor features are available in distributed environments.
 

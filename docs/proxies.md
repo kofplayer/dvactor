@@ -31,7 +31,9 @@ system.Request(远程 ref)
 3. **通知回传**：远程 watchee `Notify`/`FireEvent` 时，通知跨网送达本机 WatchProxy，再由它扇出：外部 Queue 直接 `Enqueue`（失败的队列自动退订）；actor watcher 通过 `ctx.LocalRouter` 本地批量投递，From 字段改写为真实 watchee——**对订阅者完全透明，看起来就像 watchee 在本机**。
 4. **EventGroup 语义**：跨节点事件要求各节点在 `SystemConfig.ActorTypes` 中声明 `EventHubActorType`，事件按 EventGroup 哈希落到固定节点的 EventHub actor 上（放置规则见模块 L1 文档）。
 
-辅助函数 `GetWatcheeActorRef`（`router.go`）：从 WatchProxy 自己的 ActorId（`"<type>-<id>"`）反解出 watchee 的 ActorRef——**这依赖 ActorId 中不含 `-` 之前的歧义**，是 `SplitN(s, "-", 2)` 约定。
+辅助函数 `GetWatcheeActorRef`（`router.go`）：从 WatchProxy 自己的 ActorId（`"<type>-<id>"`）反解出 watchee 的 ActorRef。实现为 `SplitN(s, "-", 2)`，首段按十进制解析成 ActorType。
+
+> **硬约束：watchee 的 ActorId 不能包含 `-`。** `SplitN(..., 2)` 只按**第一个** `-` 切分，若 ActorId 本身含 `-`，切出的首段/尾段都会错位，反解出的 ActorRef 指向不存在的 actor——表现为 **watch 静默失效**（订阅不报错，但通知永远收不到）。解析失败的情形（无 `-`、首段非数字、首段超出 uint32）一律返回 nil。
 
 ## 断线重连自愈
 

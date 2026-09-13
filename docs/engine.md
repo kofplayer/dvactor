@@ -11,6 +11,8 @@ engine/
 │   │   ├── conn.go           Conn：SendData/Disconnect/RemoteAddr + 回调
 │   │   ├── acceptor.go       Acceptor：Start/Stop/SetOnAccept
 │   │   ├── connector.go      Connector：Conn + Connect/SetOnConnect
+│   │   ├── packet.go         帧协议：PacketSplitter 累积拆帧 + 最大帧长校验
+│   │   ├── heartbeat.go      心跳：Ping/Pong 帧 msgId（0xFE/0xFD）、间隔与读超时默认值
 │   │   └── socket/           TCP 实现（socketNetConnect 包）
 │   ├── client/client.go    NetClient：Connector + 拼包/拆包 + 回调
 │   ├── server/server.go    NetServer：Acceptor + session 管理 + 拼包/拆包
