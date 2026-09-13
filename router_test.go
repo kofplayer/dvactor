@@ -93,3 +93,29 @@ func TestSendToUndeclaredSystemIdReturnsError(t *testing.T) {
 		t.Fatalf("expected ErrorCodeUnknownSystem, got code=%v err=%v", err.Code(), err)
 	}
 }
+
+// 放置哈希必须均匀铺开：历史上用的交替 XOR 在结构化 id 下会把大量 actor
+// 塞进同一节点 / 同一槽位（实测 2 万个 userN 只落 762 个槽位）。
+func TestPlacementHashSpreadsEvenly(t *testing.T) {
+	const n = 20000
+	s := newPlacementSystem(t)
+	byNode := map[vactor.SystemId]int{}
+	slots := map[vactor.GroupSlot]bool{}
+	for i := 1; i <= n; i++ {
+		ref := s.CreateActorRef(120, vactor.ActorId(fmt.Sprintf("user%d", i)))
+		byNode[ref.GetSystemId()]++
+		slots[ref.GetGroupSlot()] = true
+	}
+	if len(byNode) != 2 {
+		t.Fatalf("actors should spread over both candidate nodes, got %v", byNode)
+	}
+	for node, c := range byNode {
+		// 两个候选节点期望各约一半，允许 45%~55%
+		if c < n*45/100 || c > n*55/100 {
+			t.Errorf("node %v got %d/%d actors, too skewed", node, c, n)
+		}
+	}
+	if len(slots) < n/2 {
+		t.Errorf("only %d distinct group slots for %d actors, hash spread too poor", len(slots), n)
+	}
+}

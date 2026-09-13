@@ -545,8 +545,13 @@ func TestClusterUnreachableNodeSendFail(t *testing.T) {
 		t.Fatal("ClusterStartError should be exposed to the caller")
 	}
 
-	// 向幽灵节点请求：RequestProxy 的异步请求发送失败 → 立即回调错误 → 外层快速失败
-	_, err := n1.Request(n1.CreateActorRef(clusterEchoType, "e"), newStrValMsg("q"), clusterTestTimeout)
+	// 向幽灵节点请求：RequestProxy 的异步请求发送失败 → 立即回调错误 → 外层快速失败。
+	// 目标必须显式写成 SystemId=3：clusterEchoType 在节点 2、3 都声明了，
+	// 若用 CreateActorRef 让哈希挑节点，哈希实现一改（2026-09-13 换成 FNV-1a）
+	// 就可能落到可达的节点 2，用例随之失去意义。测试意图是"目标不可达"，
+	// 目标节点就该写死。
+	phantom := n1.CreateActorRefEx(3, clusterEchoType, "e")
+	_, err := n1.Request(phantom, newStrValMsg("q"), clusterTestTimeout)
 	if err == nil || err.Code() != dvactor.ErrorCodeMessageSendFail {
 		t.Fatalf("expected ErrorCodeMessageSendFail, got %v", err)
 	}
