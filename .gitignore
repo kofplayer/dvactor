@@ -7,3 +7,6 @@
 *.test
 *.out
 vendor/
+
+# 本地 protoc 工具链（13MB 二进制，按需自行下载）
+tools/
