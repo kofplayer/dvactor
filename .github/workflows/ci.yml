@@ -2,6 +2,12 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      vactor_ref:
+        description: 'vactor 的 revision（分支 / 标签 / 完整 SHA）；留空则用仓库内 .vactor-revision'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,13 +18,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - name: checkout dvactor
+        uses: actions/checkout@v4
 
-      - name: checkout vactor (本地 replace 依赖)
+      - name: resolve vactor revision
+        # 优先级：手动输入的 vactor_ref > 仓库内 .vactor-revision。
+        # 固定 revision 是为了让 CI 结果可复现：原先从默认分支拉取时，
+        # vactor 一有新提交，dvactor 的 CI 结果就可能变。
+        id: vactor_rev
+        run: |
+          rev="${{ github.event.inputs.vactor_ref }}"
+          if [ -z "$rev" ]; then
+            rev=$(grep -v '^[[:space:]]*#' .vactor-revision | grep -v '^[[:space:]]*$' | head -1 | tr -d ' \r')
+          fi
+          if [ -z "$rev" ]; then
+            echo "::error::无法确定 vactor revision：请检查 .vactor-revision 或手动指定 vactor_ref"
+            exit 1
+          fi
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+          echo "vactor revision: $rev"
+
+      - name: checkout vactor (pinned)
         uses: actions/checkout@v4
         with:
           repository: kofplayer/vactor
           path: vactor
+          ref: ${{ steps.vactor_rev.outputs.rev }}
+          # 按完整 SHA 检出时需要能取到该 commit
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -28,8 +55,10 @@ jobs:
         run: go mod edit -replace github.com/kofplayer/vactor=./vactor
 
       - name: show vactor revision
-        # 便于排查"vactor main 变了导致 dvactor CI 结果变化"
-        run: git -C vactor log --oneline -1
+        # 便于排查"vactor 版本变了导致 dvactor CI 结果变化"
+        run: |
+          echo "requested: ${{ steps.vactor_rev.outputs.rev }}"
+          git -C vactor log --oneline -1
 
       - name: build
         run: go build ./...
@@ -69,3 +98,8 @@ jobs:
             exit 1
           fi
           echo "coverage ${pct}% >= 85%"
+
+      - name: bench (smoke)
+        # 冒烟：确保 marshal_bench_test.go 的编解码基准能编译、能跑通。
+        # CI 机器性能波动大，不设性能阈值；-benchtime 1x 只跑一轮迭代。
+        run: go test -run '^$' -bench . -benchtime 1x -timeout 5m ./

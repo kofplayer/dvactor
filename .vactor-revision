@@ -1,0 +1,14 @@
+# dvactor CI 使用的 vactor revision（分支名 / 标签 / 完整 commit SHA）。
+#
+# 为什么固定：CI 原先从 kofplayer/vactor 的默认分支拉取，vactor 一有新提交，
+# dvactor CI 的结果就可能变——本地用 ../vactor 联调、CI 用另一个版本时很难排查。
+#
+# 更新方式：改完 vactor 并把 dvactor 跑通后，执行
+#     git -C ../vactor rev-parse HEAD
+# 把结果替换到下面的 revision 行。
+#
+# 注意：该 revision 必须已推送到 GitHub，否则 CI 检不出来。
+#
+# 手动触发（workflow_dispatch）时可用 vactor_ref 输入临时覆盖，
+# 便于验证「dvactor 能否配合 vactor 的某个分支/PR」。
+3dbf5bd42a819ce8427f0893401971290b65aad1
