@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout vactor (本地 replace 依赖)
+        uses: actions/checkout@v4
+        with:
+          repository: kofplayer/vactor
+          path: vactor
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: point replace at checked-out vactor
+        run: go mod edit -replace github.com/kofplayer/vactor=./vactor
+      - name: build
+        run: go build ./...
+      - name: vet
+        run: go vet ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: test (race)
+        run: go test -race -timeout 10m ./...

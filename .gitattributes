@@ -1,0 +1,8 @@
+# 统一换行符，保证 gofmt 校验在跨平台下一致
+* text=auto
+*.go text eol=lf
+*.md text
+*.proto text eol=lf
+*.bat text eol=crlf
+.gitattributes text eol=lf
+*.yml text eol=lf
