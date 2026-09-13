@@ -22,33 +22,33 @@ type ConnectorSocket struct {
 	port uint16
 }
 
-func (this *ConnectorSocket) Connect() error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%v:%v", this.host, this.port))
+func (cs *ConnectorSocket) Connect() error {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%v:%v", cs.host, cs.port))
 	if err != nil {
 		return err
 	}
 
 	tcpConn, ok := conn.(*net.TCPConn)
 	if ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		_ = tcpConn.SetKeepAlive(true)
+		_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
 	}
 
-	this.ConnSocket.conn = conn
-	go this.receiverRun()
-	go this.senderRun()
-	go this.heartbeatRun()
-	if this.onConnectFunc != nil {
-		this.onConnectFunc()
+	cs.conn = conn
+	go cs.receiverRun()
+	go cs.senderRun()
+	go cs.heartbeatRun()
+	if cs.onConnectFunc != nil {
+		cs.onConnectFunc()
 	}
 	return nil
 }
 
-func (this *ConnectorSocket) SetOnConnect(onConnectFunc netConnect.OnConnectFunc) {
-	this.onConnectFunc = onConnectFunc
+func (cs *ConnectorSocket) SetOnConnect(onConnectFunc netConnect.OnConnectFunc) {
+	cs.onConnectFunc = onConnectFunc
 }
 
-func (this *ConnectorSocket) SetAddress(host string, port uint16) {
-	this.host = host
-	this.port = port
+func (cs *ConnectorSocket) SetAddress(host string, port uint16) {
+	cs.host = host
+	cs.port = port
 }

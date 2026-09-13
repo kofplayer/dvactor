@@ -159,7 +159,7 @@ func (s *system) onSystemReconnected(remote vactor.SystemId) {
 			return true
 		}
 		proxy := key.(vactor.ActorRefImpl)
-		s.LocalRouter(&vactor.EnvelopeSend{
+		_ = s.LocalRouter(&vactor.EnvelopeSend{
 			FromActorRef: &proxy,
 			ToActorRef:   &proxy,
 			Message:      &watchProxyRefresh{},

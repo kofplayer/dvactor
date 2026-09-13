@@ -86,7 +86,7 @@ func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data 
 		svr.cn.localSystem.LogInfo("system %v connected", req.SystemId)
 		// 对端重新注册意味着连接经历过断开：触发本机代理 watch 刷新
 		svr.cn.localSystem.onSystemReconnected(info.config.SystemId)
-		s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), data)
+		_ = s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), data)
 		return nil
 	default:
 		return svr.cn.OnMessage(msgId, data)
@@ -138,7 +138,7 @@ func NewServer(cn *clusterNet) *clusterServer {
 			svr.cn.localSystem.LogError("on message error: %v", err)
 			// 出错即断开该会话；连接关闭后 server/client 双侧绑定均会被清理，
 			// 对端按退避重连恢复
-			s.Close()
+			_ = s.Close()
 		}
 		return err
 	})

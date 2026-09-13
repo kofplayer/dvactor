@@ -98,7 +98,7 @@ func (c *clusterClient) Start() {
 			}
 			data, _ := proto.Marshal(req)
 			if err := c.cli.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemReq), data); err != nil {
-				c.cli.Disconnect()
+				_ = c.cli.Disconnect()
 				if !c.backoff(reconnectBackoff) {
 					return
 				}
@@ -115,14 +115,14 @@ func (c *clusterClient) Start() {
 				continue
 			case <-time.After(registerResponseTimeout):
 				c.cn.localSystem.LogError("system %v register response timeout, retry", info.config.SystemId)
-				c.cli.Disconnect()
+				_ = c.cli.Disconnect()
 				if !c.backoff(reconnectBackoff) {
 					return
 				}
 				continue
 			case succ := <-c.registerResponseChan:
 				if !succ {
-					c.cli.Disconnect()
+					_ = c.cli.Disconnect()
 					if !c.backoff(reconnectBackoff) {
 						return
 					}

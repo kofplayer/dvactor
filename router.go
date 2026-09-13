@@ -88,7 +88,7 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 				Messages:     e.Messages,
 			}
 			if systemId == r.systemId {
-				r.system.LocalRouter(ebs)
+				_ = r.system.LocalRouter(ebs)
 			} else if sendErr := r.clusterNet.Send(systemId, ebs); sendErr != nil {
 				if err == nil {
 					err = sendErr
@@ -100,12 +100,12 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 	case *vactor.EnvelopeWatch:
 		systemId := e.ToActorRef.GetSystemId()
 		if systemId == r.systemId {
-			r.system.LocalRouter(e)
+			_ = r.system.LocalRouter(e)
 		} else {
 			if e.FromActorRef.GetActorType() == WatchProxyActorType {
 				err = r.clusterNet.Send(systemId, e)
 			} else {
-				r.system.LocalRouter(&vactor.EnvelopeSend{
+				_ = r.system.LocalRouter(&vactor.EnvelopeSend{
 					FromActorRef: e.FromActorRef,
 					Message: &InnerWatch{
 						WatchType: e.WatchType,
@@ -133,7 +133,7 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 				},
 			}
 			if systemId == r.systemId {
-				r.system.LocalRouter(en)
+				_ = r.system.LocalRouter(en)
 			} else if sendErr := r.clusterNet.Send(systemId, en); sendErr != nil {
 				if err == nil {
 					err = sendErr
@@ -145,9 +145,9 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 	case *vactor.EnvelopeOuterWatch:
 		systemId := e.ToActorRef.GetSystemId()
 		if systemId == r.systemId {
-			r.system.LocalRouter(e)
+			_ = r.system.LocalRouter(e)
 		} else {
-			r.system.LocalRouter(&vactor.EnvelopeSend{
+			_ = r.system.LocalRouter(&vactor.EnvelopeSend{
 				Message: &OuterWatch{
 					WatchType: e.WatchType,
 					IsWatch:   e.IsWatch,
@@ -160,9 +160,9 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 	case *vactor.EnvelopeOuterRequest:
 		systemId := e.ToActorRef.GetSystemId()
 		if systemId == r.systemId {
-			r.system.LocalRouter(e)
+			_ = r.system.LocalRouter(e)
 		} else {
-			r.system.LocalRouter(&vactor.EnvelopeSend{
+			_ = r.system.LocalRouter(&vactor.EnvelopeSend{
 				Message: &OuterRequest{
 					ToActorRef: e.ToActorRef,
 					Message:    e.Message,
@@ -175,7 +175,7 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 	default:
 		systemId := envelope.GetToActorRef().GetSystemId()
 		if systemId == r.systemId {
-			r.system.LocalRouter(e)
+			_ = r.system.LocalRouter(e)
 		} else {
 			err = r.clusterNet.Send(systemId, e)
 		}

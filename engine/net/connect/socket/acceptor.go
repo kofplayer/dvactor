@@ -23,54 +23,54 @@ type AcceptorSocket struct {
 
 // SetOnListen 设置监听结果回调：Start 后回调一次，err 为 nil 表示已成功监听
 // 并进入 Accept 循环，否则为监听失败原因。用于上层同步感知端口绑定结果。
-func (this *AcceptorSocket) SetOnListen(f func(error)) {
-	this.onListenFunc = f
+func (as *AcceptorSocket) SetOnListen(f func(error)) {
+	as.onListenFunc = f
 }
 
-func (this *AcceptorSocket) notifyListen(err error) {
-	if this.onListenFunc != nil {
-		this.onListenFunc(err)
+func (as *AcceptorSocket) notifyListen(err error) {
+	if as.onListenFunc != nil {
+		as.onListenFunc(err)
 	}
 }
 
-func (this *AcceptorSocket) Start() error {
+func (as *AcceptorSocket) Start() error {
 	var err error
-	this.listener, err = net.Listen("tcp", this.host+":"+strconv.Itoa(int(this.port)))
+	as.listener, err = net.Listen("tcp", as.host+":"+strconv.Itoa(int(as.port)))
 	if err != nil {
-		this.notifyListen(err)
+		as.notifyListen(err)
 		return err
 	}
-	this.notifyListen(nil)
+	as.notifyListen(nil)
 	for {
-		conn, err := this.listener.Accept()
+		conn, err := as.listener.Accept()
 		if err != nil {
 			return err
 		}
 		tcpConn, ok := conn.(*net.TCPConn)
 		if ok {
-			tcpConn.SetKeepAlive(true)
-			tcpConn.SetKeepAlivePeriod(30 * time.Second)
+			_ = tcpConn.SetKeepAlive(true)
+			_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
 		}
 		c := newConn(conn)
-		this.onAcceptFunc(c)
+		as.onAcceptFunc(c)
 		go c.receiverRun()
 		go c.senderRun()
 		go c.heartbeatRun()
 	}
 }
 
-func (this *AcceptorSocket) Stop() error {
-	if this.listener != nil {
-		this.listener.Close()
+func (as *AcceptorSocket) Stop() error {
+	if as.listener != nil {
+		_ = as.listener.Close()
 	}
 	return nil
 }
 
-func (this *AcceptorSocket) SetOnAccept(onAcceptFunc netConnect.OnAcceptFunc) {
-	this.onAcceptFunc = onAcceptFunc
+func (as *AcceptorSocket) SetOnAccept(onAcceptFunc netConnect.OnAcceptFunc) {
+	as.onAcceptFunc = onAcceptFunc
 }
 
-func (this *AcceptorSocket) SetAddress(host string, port uint16) {
-	this.host = host
-	this.port = port
+func (as *AcceptorSocket) SetAddress(host string, port uint16) {
+	as.host = host
+	as.port = port
 }

@@ -355,7 +355,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		cn.localSystem.LocalRouter(&vactor.EnvelopeSend{
+		_ = cn.localSystem.LocalRouter(&vactor.EnvelopeSend{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Message:      msg,
@@ -384,7 +384,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			ToActorRefs:  toActorRefs,
 			Messages:     msgs,
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeRequestAsync:
 		pkg := &protocol.PkgEnvelopeRequestAsync{}
 		err := proto.Unmarshal(data, pkg)
@@ -402,7 +402,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
 			CallbackAddress: pkg.CallbackAddress,
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeResponseAsync:
 		pkg := &protocol.PkgEnvelopeResponseAsync{}
 		err := proto.Unmarshal(data, pkg)
@@ -428,7 +428,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
 			CallbackAddress: pkg.CallbackAddress,
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeRequest:
 		pkg := &protocol.PkgEnvelopeRequest{}
 		err := proto.Unmarshal(data, pkg)
@@ -445,7 +445,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			Message:      msg,
 			RequestId:    vactor.CallbackId(pkg.RequestId),
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeResponse:
 		pkg := &protocol.PkgEnvelopeResponse{}
 		err := proto.Unmarshal(data, pkg)
@@ -470,7 +470,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 				Message: msg,
 			},
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeWatch:
 		pkg := &protocol.PkgEnvelopeWatch{}
 		err := proto.Unmarshal(data, pkg)
@@ -483,7 +483,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			WatchType:    vactor.WatchType(pkg.WatchType),
 			IsWatch:      pkg.IsWatch,
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeNotify:
 		pkg := &protocol.PkgEnvelopeNotify{}
 		err := proto.Unmarshal(data, pkg)
@@ -508,7 +508,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 				Message:   msg,
 			},
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeFireNotify:
 		pkg := &protocol.PkgEnvelopeFireNotify{}
 		err := proto.Unmarshal(data, pkg)
@@ -526,7 +526,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			WatchType:    vactor.WatchType(pkg.WatchType),
 			Message:      msg,
 		}
-		cn.localSystem.LocalRouter(e)
+		_ = cn.localSystem.LocalRouter(e)
 	default:
 		cn.localSystem.LogError("unknown pkg type %v", msgId)
 	}

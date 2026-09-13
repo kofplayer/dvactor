@@ -43,84 +43,84 @@ type ConnSocket struct {
 	heartbeatTimeout  time.Duration
 }
 
-func (this *ConnSocket) RemoteAddr() string {
-	if this.conn == nil || this.conn.RemoteAddr() == nil {
+func (c *ConnSocket) RemoteAddr() string {
+	if c.conn == nil || c.conn.RemoteAddr() == nil {
 		return ""
 	}
-	return this.conn.RemoteAddr().String()
+	return c.conn.RemoteAddr().String()
 }
 
 // Disconnect 通过关闭发送队列驱动 sender 退出再关闭底层连接；
 // 断线回调由 sender/receiver 观察到关闭后经 notifyDisconnect 触发（恰好一次）。
-func (this *ConnSocket) Disconnect() error {
-	this.q.Close()
+func (c *ConnSocket) Disconnect() error {
+	c.q.Close()
 	return nil
 }
 
 // notifyDisconnect 触发断线回调（幂等）。无论断线由何种路径引起——读错误、
 // 写错误或本端主动 Disconnect——都必须回调，否则本端绑定状态永不清理。
-func (this *ConnSocket) notifyDisconnect() {
-	this.disconnectOnce.Do(func() {
-		if this.onDisconnectFunc != nil {
-			this.onDisconnectFunc()
+func (c *ConnSocket) notifyDisconnect() {
+	c.disconnectOnce.Do(func() {
+		if c.onDisconnectFunc != nil {
+			c.onDisconnectFunc()
 		}
 	})
 }
 
-func (this *ConnSocket) SendData(data []byte) error {
-	if !this.q.Enqueue(data) {
+func (c *ConnSocket) SendData(data []byte) error {
+	if !c.q.Enqueue(data) {
 		return errors.New("connection closed")
 	}
 	return nil
 }
 
-func (this *ConnSocket) SetOnDisconnect(onDisconnectFunc netConnect.OnDisconnectFunc) {
-	this.onDisconnectFunc = onDisconnectFunc
+func (c *ConnSocket) SetOnDisconnect(onDisconnectFunc netConnect.OnDisconnectFunc) {
+	c.onDisconnectFunc = onDisconnectFunc
 }
 
-func (this *ConnSocket) SetOnData(onDataFunc netConnect.OnDataFunc) {
-	this.onDataFunc = onDataFunc
+func (c *ConnSocket) SetOnData(onDataFunc netConnect.OnDataFunc) {
+	c.onDataFunc = onDataFunc
 }
 
-func (this *ConnSocket) receiverRun() {
-	reader := bufio.NewReader(this.conn)
+func (c *ConnSocket) receiverRun() {
+	reader := bufio.NewReader(c.conn)
 	var buf [4096]byte
 	for {
-		if this.heartbeatTimeout > 0 {
+		if c.heartbeatTimeout > 0 {
 			// 读超时兜底检测半开连接；任何收到的帧（含心跳 Pong）都会重置它
-			this.conn.SetReadDeadline(time.Now().Add(this.heartbeatTimeout))
+			_ = c.conn.SetReadDeadline(time.Now().Add(c.heartbeatTimeout))
 		}
 		n, err := reader.Read(buf[:])
 		if err != nil {
-			this.q.Close()
-			this.notifyDisconnect()
+			c.q.Close()
+			c.notifyDisconnect()
 			return
 		}
-		err = this.onDataFunc(buf[:n])
+		err = c.onDataFunc(buf[:n])
 		if err != nil {
-			this.q.Close()
-			this.notifyDisconnect()
+			c.q.Close()
+			c.notifyDisconnect()
 			return
 		}
 	}
 }
 
-func (this *ConnSocket) senderRun() {
+func (c *ConnSocket) senderRun() {
 	for {
-		data, ok := this.q.Dequeue()
+		data, ok := c.q.Dequeue()
 		if !ok {
-			this.conn.Close()
+			_ = c.conn.Close()
 			return
 		}
 		msg := data
 		for len(msg) > 0 {
-			n, err := this.conn.Write(msg)
+			n, err := c.conn.Write(msg)
 			if err != nil {
 				// 写失败不能只静默退出：关闭连接并触发回调，
 				// 否则发送队列无消费者、连接进入半死状态
-				this.q.Close()
-				this.conn.Close()
-				this.notifyDisconnect()
+				c.q.Close()
+				_ = c.conn.Close()
+				c.notifyDisconnect()
 				return
 			}
 			msg = msg[n:]
@@ -129,20 +129,20 @@ func (this *ConnSocket) senderRun() {
 }
 
 // heartbeatRun 周期性向发送队列注入心跳帧，由接收方的读超时完成死链检测。
-func (this *ConnSocket) heartbeatRun() {
-	if this.heartbeatInterval <= 0 {
+func (c *ConnSocket) heartbeatRun() {
+	if c.heartbeatInterval <= 0 {
 		return
 	}
-	ticker := time.NewTicker(this.heartbeatInterval)
+	ticker := time.NewTicker(c.heartbeatInterval)
 	defer ticker.Stop()
 	pkt, err := netConnect.PackMessage(netConnect.HeartbeatMsgIdPing, nil)
 	if err != nil {
 		return
 	}
 	for range ticker.C {
-		if this.q.IsClosed() {
+		if c.q.IsClosed() {
 			return
 		}
-		_ = this.q.Enqueue(pkt) // 队列已关闭时返回 false，下轮退出
+		_ = c.q.Enqueue(pkt) // 队列已关闭时返回 false，下轮退出
 	}
 }

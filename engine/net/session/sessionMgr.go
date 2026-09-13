@@ -26,7 +26,7 @@ type sessionMgr struct {
 
 func (m *sessionMgr) NewSession() NetSession {
 	v := new(netSession)
-	v.Init()
+	_ = v.Init()
 	v.id = SessionID(m.genUId.Add(1))
 	m.lock.Lock()
 	defer m.lock.Unlock()
