@@ -25,9 +25,11 @@ const (
 type ErrorCode int32
 
 const (
-	ErrorCode_ErrorCodeSuccess      ErrorCode = 0
-	ErrorCode_ErrorCodeTimeout      ErrorCode = 1
-	ErrorCode_ErrorCodeInvalidActor ErrorCode = 2
+	ErrorCode_ErrorCodeSuccess          ErrorCode = 0
+	ErrorCode_ErrorCodeTimeout          ErrorCode = 1
+	ErrorCode_ErrorCodeInvalidActor     ErrorCode = 2
+	ErrorCode_ErrorCodeSystemNotStarted ErrorCode = 3
+	ErrorCode_ErrorCodeHandlerPanic     ErrorCode = 4
 )
 
 // Enum value maps for ErrorCode.
@@ -36,11 +38,15 @@ var (
 		0: "ErrorCodeSuccess",
 		1: "ErrorCodeTimeout",
 		2: "ErrorCodeInvalidActor",
+		3: "ErrorCodeSystemNotStarted",
+		4: "ErrorCodeHandlerPanic",
 	}
 	ErrorCode_value = map[string]int32{
-		"ErrorCodeSuccess":      0,
-		"ErrorCodeTimeout":      1,
-		"ErrorCodeInvalidActor": 2,
+		"ErrorCodeSuccess":          0,
+		"ErrorCodeTimeout":          1,
+		"ErrorCodeInvalidActor":     2,
+		"ErrorCodeSystemNotStarted": 3,
+		"ErrorCodeHandlerPanic":     4,
 	}
 )
 
@@ -956,8 +962,11 @@ func (x *PkgEnvelopeFireNotify) GetMessage() *Message {
 }
 
 type PkgRegisterSystemReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SystemId      uint32                 `protobuf:"varint,1,opt,name=SystemId,proto3" json:"SystemId,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	SystemId uint32                 `protobuf:"varint,1,opt,name=SystemId,proto3" json:"SystemId,omitempty"`
+	// AuthToken 共享密钥：ClusterConfig.AuthToken 非空时，server 校验不匹配的注册
+	// （明文传输，仅作准入校验，不提供机密性；跨公网请配合 TLS 或网络层隔离）
+	AuthToken     string `protobuf:"bytes,2,opt,name=AuthToken,proto3" json:"AuthToken,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -997,6 +1006,13 @@ func (x *PkgRegisterSystemReq) GetSystemId() uint32 {
 		return x.SystemId
 	}
 	return 0
+}
+
+func (x *PkgRegisterSystemReq) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
 }
 
 type PkgRegisterSystemRsp struct {
@@ -1128,15 +1144,18 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"NotifyType\x18\x03 \x01(\rR\n" +
 	"NotifyType\x12\x1c\n" +
 	"\tWatchType\x18\x04 \x01(\rR\tWatchType\x12+\n" +
-	"\aMessage\x18\x05 \x01(\v2\x11.protocol.MessageR\aMessage\"2\n" +
+	"\aMessage\x18\x05 \x01(\v2\x11.protocol.MessageR\aMessage\"P\n" +
 	"\x14PkgRegisterSystemReq\x12\x1a\n" +
-	"\bSystemId\x18\x01 \x01(\rR\bSystemId\"I\n" +
+	"\bSystemId\x18\x01 \x01(\rR\bSystemId\x12\x1c\n" +
+	"\tAuthToken\x18\x02 \x01(\tR\tAuthToken\"I\n" +
 	"\x14PkgRegisterSystemRsp\x121\n" +
-	"\tErrorCode\x18\x01 \x01(\x0e2\x13.protocol.ErrorCodeR\tErrorCode*R\n" +
+	"\tErrorCode\x18\x01 \x01(\x0e2\x13.protocol.ErrorCodeR\tErrorCode*\x8c\x01\n" +
 	"\tErrorCode\x12\x14\n" +
 	"\x10ErrorCodeSuccess\x10\x00\x12\x14\n" +
 	"\x10ErrorCodeTimeout\x10\x01\x12\x19\n" +
-	"\x15ErrorCodeInvalidActor\x10\x02*\xdd\x02\n" +
+	"\x15ErrorCodeInvalidActor\x10\x02\x12\x1d\n" +
+	"\x19ErrorCodeSystemNotStarted\x10\x03\x12\x19\n" +
+	"\x15ErrorCodeHandlerPanic\x10\x04*\xdd\x02\n" +
 	"\aPkgType\x12\x0f\n" +
 	"\vPkgTypeNone\x10\x00\x12\x17\n" +
 	"\x13PkgTypeEnvelopeSend\x10\x01\x12\x1c\n" +

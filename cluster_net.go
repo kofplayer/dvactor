@@ -61,6 +61,23 @@ func ActorRefFromProto(actorRef *protocol.ActorRef) vactor.ActorRef {
 	}
 }
 
+// marshalMessage 包装 MarshalMessage：nil 消息（如"只回错误"的响应）允许跨节点，
+// 编码为不含 Message 的包；接收侧 unmarshalMessage 对称还原为 nil。
+func (cn *clusterNet) marshalMessage(msg interface{}) (*protocol.Message, vactor.VAError) {
+	if msg == nil {
+		return nil, nil
+	}
+	return cn.localSystem.MarshalMessage(msg)
+}
+
+// unmarshalMessage 包装 UnmarshalMessage：包内未携带 Message 时返回 (nil, nil)。
+func (cn *clusterNet) unmarshalMessage(pm *protocol.Message) (interface{}, error) {
+	if pm == nil {
+		return nil, nil
+	}
+	return cn.localSystem.UnmarshalMessage(pm)
+}
+
 type clusterNet struct {
 	localSystem          *system
 	localSystemIndex     int
@@ -124,8 +141,24 @@ func (cn *clusterNet) start() error {
 	return nil
 }
 
+// stop 停止集群网络：终止所有重连循环、关闭监听与已建立的会话（幂等）。
+func (cn *clusterNet) stop() {
+	for _, client := range cn.clients {
+		client.Stop()
+	}
+	if cn.server != nil {
+		cn.server.Stop()
+	}
+}
+
 func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte) vactor.VAError {
-	info := cn.systemInfos[systemId]
+	info, ok := cn.systemInfos[systemId]
+	if !ok || info == nil {
+		// 目标系统未在集群配置中声明。必须返回错误而不是继续解引用：调用方可能
+		// 在系统外（main/业务 goroutine），那里没有 recover 兜底，panic 会直接杀进程。
+		cn.localSystem.LogError("system %v is not declared in cluster config", systemId)
+		return vactor.NewVAError(ErrorCodeUnknownSystem)
+	}
 	info.lock.RLock()
 	defer info.lock.RUnlock()
 	var err error
@@ -155,7 +188,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 
 	switch e := envelope.(type) {
 	case *vactor.EnvelopeSend:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -168,7 +201,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 	case *vactor.EnvelopeBatchSend:
 		messages := make([]*protocol.Message, 0, len(e.Messages))
 		for _, message := range e.Messages {
-			msg, err := cn.localSystem.MarshalMessage(message)
+			msg, err := cn.marshalMessage(message)
 			if err != nil {
 				cn.localSystem.LogError("MarshalMessage error: %v\n", err)
 				continue
@@ -190,7 +223,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			Messages:     messages,
 		}
 	case *vactor.EnvelopeRequestAsync:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -203,7 +236,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeResponseAsync:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -224,7 +257,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeRequest:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -236,7 +269,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			RequestId:    uint32(e.RequestId),
 		}
 	case *vactor.EnvelopeResponse:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -282,7 +315,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			Message:      msg,
 		}
 	case *vactor.EnvelopeFireNotify:
-		msg, err := cn.localSystem.MarshalMessage(e.Message)
+		msg, err := cn.marshalMessage(e.Message)
 		if err != nil {
 			return err
 		}
@@ -313,7 +346,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		msg, err := cn.localSystem.UnmarshalMessage(pkg.Message)
+		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
 			return err
 		}
@@ -330,7 +363,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		}
 		msgs := make([]interface{}, 0, len(pkg.Messages))
 		for _, protoMsg := range pkg.Messages {
-			msg, err := cn.localSystem.UnmarshalMessage(protoMsg)
+			msg, err := cn.unmarshalMessage(protoMsg)
 			if err != nil {
 				cn.localSystem.LogError("UnmarshalMessage error: %v", err)
 				continue
@@ -353,7 +386,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		msg, err := cn.localSystem.UnmarshalMessage(pkg.Message)
+		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
 			return err
 		}
@@ -372,17 +405,19 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			return err
 		}
 		var msg interface{}
-		if pkg.Response.Message != nil {
-			msg, err = cn.localSystem.UnmarshalMessage(pkg.Response.Message)
-			if err != nil {
+		// 对端可能不填 Response（nil）：此处不能再解引用它，按成功码处理
+		var rspCode protocol.ErrorCode
+		if pkg.Response != nil {
+			if msg, err = cn.unmarshalMessage(pkg.Response.Message); err != nil {
 				return err
 			}
+			rspCode = pkg.Response.ErrorCode
 		}
 		e := &vactor.EnvelopeResponseAsync{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			Response: &vactor.Response{
-				Error:   errorCodeToVAError(pkg.Response.ErrorCode),
+				Error:   errorCodeToVAError(rspCode),
 				Message: msg,
 			},
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
@@ -395,7 +430,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		msg, err := cn.localSystem.UnmarshalMessage(pkg.Message)
+		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
 			return err
 		}
@@ -413,18 +448,20 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			return err
 		}
 		var msg interface{}
-		if pkg.Response.Message != nil {
-			msg, err = cn.localSystem.UnmarshalMessage(pkg.Response.Message)
-			if err != nil {
+		// 同上：Response 字段可能缺失，缺失时按成功码还原
+		var rspCode protocol.ErrorCode
+		if pkg.Response != nil {
+			if msg, err = cn.unmarshalMessage(pkg.Response.Message); err != nil {
 				return err
 			}
+			rspCode = pkg.Response.ErrorCode
 		}
 		e := &vactor.EnvelopeResponse{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
 			RequestId:    vactor.CallbackId(pkg.RequestId),
 			Response: &vactor.Response{
-				Error:   errorCodeToVAError(pkg.Response.ErrorCode),
+				Error:   errorCodeToVAError(rspCode),
 				Message: msg,
 			},
 		}
@@ -448,7 +485,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		msg, err := cn.localSystem.UnmarshalMessage(pkg.Message)
+		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
 			return err
 		}
@@ -473,7 +510,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		if err != nil {
 			return err
 		}
-		msg, err := cn.localSystem.UnmarshalMessage(pkg.Message)
+		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
 			return err
 		}
@@ -485,6 +522,8 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			Message:      msg,
 		}
 		cn.localSystem.LocalRouter(e)
+	default:
+		cn.localSystem.LogError("unknown pkg type %v", msgId)
 	}
 	return nil
 }

@@ -92,8 +92,12 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 			}
 			if systemId == r.systemId {
 				r.system.LocalRouter(ebs)
-			} else {
-				err = r.clusterNet.Send(systemId, ebs)
+			} else if sendErr := r.clusterNet.Send(systemId, ebs); sendErr != nil {
+				if err == nil {
+					err = sendErr
+				} else {
+					r.system.LogError("router err: %v", sendErr)
+				}
 			}
 		}
 	case *vactor.EnvelopeWatch:
@@ -133,8 +137,12 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 			}
 			if systemId == r.systemId {
 				r.system.LocalRouter(en)
-			} else {
-				err = r.clusterNet.Send(systemId, en)
+			} else if sendErr := r.clusterNet.Send(systemId, en); sendErr != nil {
+				if err == nil {
+					err = sendErr
+				} else {
+					r.system.LogError("router err: %v", sendErr)
+				}
 			}
 		}
 	case *vactor.EnvelopeOuterWatch:
@@ -162,6 +170,7 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 					ToActorRef: e.ToActorRef,
 					Message:    e.Message,
 					RspChan:    e.RspChan,
+					Timeout:    e.Timeout,
 				},
 				ToActorRef: GetRequestProxyActorRef(r.system, r.systemId, e.ToActorRef),
 			})

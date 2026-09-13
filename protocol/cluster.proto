@@ -8,6 +8,8 @@ enum ErrorCode {
   	ErrorCodeSuccess = 0;
   	ErrorCodeTimeout = 1;
   	ErrorCodeInvalidActor = 2;
+  	ErrorCodeSystemNotStarted = 3;
+  	ErrorCodeHandlerPanic = 4;
 }
 
 enum PkgType {
@@ -110,6 +112,9 @@ message PkgEnvelopeFireNotify {
 
 message PkgRegisterSystemReq {
 	uint32 SystemId = 1;
+	// AuthToken 共享密钥：ClusterConfig.AuthToken 非空时，server 校验不匹配的注册
+	// （明文传输，仅作准入校验，不提供机密性；跨公网请配合 TLS 或网络层隔离）
+	string AuthToken = 2;
 }
 
 message PkgRegisterSystemRsp {

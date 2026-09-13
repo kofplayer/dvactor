@@ -12,7 +12,9 @@ const (
 	ErrorCodeMessageLenError        vactor.ErrorCode = vactor.ErrorCodeCustomStart + 4
 	ErrorCodeUnknownEnvelope        vactor.ErrorCode = vactor.ErrorCodeCustomStart + 5
 	ErrorCodeMessageSendFail        vactor.ErrorCode = vactor.ErrorCodeCustomStart + 6
-	ErrorCodeCustomStart            vactor.ErrorCode = vactor.ErrorCodeCustomStart + 100
+	// ErrorCodeUnknownSystem 目标 SystemId 未在 ClusterConfig.SystemConfigs 中声明
+	ErrorCodeUnknownSystem vactor.ErrorCode = vactor.ErrorCodeCustomStart + 7
+	ErrorCodeCustomStart   vactor.ErrorCode = vactor.ErrorCodeCustomStart + 100
 )
 
 // errorCodeToVAError 把线协议错误码还原为 VAError；成功码返回 nil（保持 err == nil 语义）。

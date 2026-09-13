@@ -20,6 +20,10 @@ func NewWatchProxy() *WatchProxy {
 	}
 }
 
+// watchProxyRefresh 触发代理向 watchee 重新发起全部 watch 订阅。
+// 仅在本机流转（重连成功后由 onSystemReconnected 投递），不跨节点序列化。
+type watchProxyRefresh struct{}
+
 type InnerWatch struct {
 	WatchType vactor.WatchType
 	IsWatch   bool
@@ -87,6 +91,26 @@ func (wp *WatchProxy) OnMessage(ctx vactor.EnvelopeContext) {
 				ToActorRefs:  actorRefs,
 				Messages:     []interface{}{e},
 			})
+		}
+	}
+}
+
+// refreshWatches 对当前所有仍有订阅者的 WatchType 重新发起对 watchee 的 watch。
+// 场景：分区期间发出的订阅（watch 信封发送失败）或对端节点重启导致
+// watchee 侧订阅关系丢失；重连成功后由 onSystemReconnected 触发本方法自愈。
+// 重复 watch 在 watchee 侧按 watcher 引用去重，幂等。
+func (wp *WatchProxy) refreshWatches(ctx vactor.EnvelopeContext) {
+	if wp.watcheeActorRef == nil {
+		return
+	}
+	refreshed := make(map[vactor.WatchType]bool)
+	for watchType := range wp.queuess {
+		ctx.Watch(wp.watcheeActorRef, watchType)
+		refreshed[watchType] = true
+	}
+	for watchType := range wp.watcherss {
+		if !refreshed[watchType] {
+			ctx.Watch(wp.watcheeActorRef, watchType)
 		}
 	}
 }
