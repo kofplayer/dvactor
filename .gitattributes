@@ -6,3 +6,4 @@
 *.bat text eol=crlf
 .gitattributes text eol=lf
 *.yml text eol=lf
+.vactor-revision text eol=lf
