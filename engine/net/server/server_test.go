@@ -36,7 +36,7 @@ func startServerClient(t *testing.T) (chan frame, chan frame, chan struct{}, net
 	srv.SetOnConnect(func(s netSession.NetSession) {})
 	srv.SetOnMessage(func(s netSession.NetSession, msgId uint32, data []byte) error {
 		srvFrames <- frame{msgId, string(data)}
-		s.SendMessage(msgId+100, []byte("re:"+string(data)))
+		_ = s.SendMessage(msgId+100, []byte("re:"+string(data)))
 		return nil
 	})
 	srv.SetOnDisconnect(func(s netSession.NetSession) {
@@ -89,7 +89,7 @@ func TestSocketRoundtrip(t *testing.T) {
 // 客户端主动断开：server 侧 OnDisconnect 必须触发（会话清理依赖它）。
 func TestSocketClientDisconnectFiresServerCallback(t *testing.T) {
 	srvFrames, _, srvDisconnected, cli := startServerClient(t)
-	cli.SendMessage(1, []byte("x"))
+	_ = cli.SendMessage(1, []byte("x"))
 	vt.WaitChan(t, srvFrames, 3*time.Second, "frame before disconnect")
 
 	if err := cli.Disconnect(); err != nil {
@@ -119,7 +119,7 @@ func TestSocketHandlerErrorClosesSession(t *testing.T) {
 	srv.SetOnMessage(func(s netSession.NetSession, msgId uint32, data []byte) error {
 		if msgId == 9 {
 			err := &testErr{}
-			s.Close() // 上层主动关闭会话（netServer 不处理 handler 错误）
+			_ = s.Close() // 上层主动关闭会话（netServer 不处理 handler 错误）
 			return err
 		}
 		return nil
@@ -144,7 +144,7 @@ func TestSocketHandlerErrorClosesSession(t *testing.T) {
 		t.Fatal("connect failed")
 	}
 
-	cli.SendMessage(9, []byte("poison"))
+	_ = cli.SendMessage(9, []byte("poison"))
 	vt.WaitFor(t, 3*time.Second, "client saw disconnect after handler error", func() bool {
 		select {
 		case <-cliDisconnected:

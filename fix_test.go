@@ -67,11 +67,11 @@ func TestPackAndSplit(t *testing.T) {
 	// 模拟粘包：剩余字节一次给齐（含两帧）
 	sp.Append(stream[3:])
 
-	id, payload, ok, err := sp.Next()
+	id, payload, ok, _ := sp.Next()
 	if !ok || id != 1 || string(payload) != "hello" {
 		t.Fatalf("frame1 mismatch: id=%v payload=%q ok=%v", id, payload, ok)
 	}
-	id, payload, ok, err = sp.Next()
+	id, payload, ok, _ = sp.Next()
 	if !ok || id != 11 || string(payload) != "world!!" {
 		t.Fatalf("frame2 mismatch: id=%v payload=%q ok=%v", id, payload, ok)
 	}

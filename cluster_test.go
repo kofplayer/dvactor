@@ -237,8 +237,8 @@ func TestClusterInnerWatchCrossNode(t *testing.T) {
 	if m.WatchType != clusterWatchType {
 		t.Fatalf("watchType = %v", m.WatchType)
 	}
-	if m.ActorRef.GetActorId() != "t1" {
-		t.Fatalf("ActorRef should be the watchee, got %v", m.ActorRef.GetActorId())
+	if m.GetActorId() != "t1" {
+		t.Fatalf("ActorRef should be the watchee, got %v", m.GetActorId())
 	}
 	if mv, ok := m.Message.(*wrapperspb.StringValue); !ok || mv.GetValue() != "hi" {
 		t.Fatalf("message = %T %v", m.Message, m.Message)

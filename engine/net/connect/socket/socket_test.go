@@ -304,7 +304,7 @@ func TestAcceptorReportsListenFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	port := l.Addr().(*net.TCPAddr).Port
 
 	acc := NewAcceptor()
@@ -330,7 +330,7 @@ func TestConnectorDialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 
 	cli := NewConnector()
 	cli.SetAddress("127.0.0.1", uint16(port))

@@ -44,7 +44,7 @@ func TestSend(systemId vactor.SystemId) {
 				for i := 0; i < len(actorRefs); i++ {
 					actorRefs[i] = ctx.CreateActorRef(TestActorType, vactor.ActorId(fmt.Sprintf("%v", i)))
 				}
-				ctx.BatchSend(actorRefs, []interface{}{
+				_ = ctx.BatchSend(actorRefs, []interface{}{
 					&TestMessage{
 						Msg: "inner hello1",
 					},
@@ -76,7 +76,7 @@ func TestSend(systemId vactor.SystemId) {
 	for i := 0; i < len(actorRefs); i++ {
 		actorRefs[i] = system.CreateActorRef(TestActorType, vactor.ActorId(fmt.Sprintf("%v", i)))
 	}
-	system.BatchSend(actorRefs, []interface{}{
+	_ = system.BatchSend(actorRefs, []interface{}{
 		&TestMessage{
 			Msg: "outer hello1 from: " + fmt.Sprint(systemId),
 		},

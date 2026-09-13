@@ -72,7 +72,7 @@ func TestClusterStartReportsBindFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("occupy port: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	n1ts, n1 := dtu.NewNode(t, 1, cfgs, 2*time.Second, nil)
 	n1.Start()
