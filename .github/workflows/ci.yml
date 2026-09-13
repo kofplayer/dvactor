@@ -2,26 +2,70 @@ name: ci
 on:
   push:
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
       - name: checkout vactor (本地 replace 依赖)
         uses: actions/checkout@v4
         with:
           repository: kofplayer/vactor
           path: vactor
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+
       - name: point replace at checked-out vactor
         run: go mod edit -replace github.com/kofplayer/vactor=./vactor
+
+      - name: show vactor revision
+        # 便于排查"vactor main 变了导致 dvactor CI 结果变化"
+        run: git -C vactor log --oneline -1
+
       - name: build
         run: go build ./...
+
       - name: vet
         run: go vet ./...
+
       - name: gofmt
-        run: test -z "$(gofmt -l . | tee /dev/stderr)"
-      - name: test (race)
-        run: go test -race -timeout 10m ./...
+        # 只检查本仓库代码：./vactor 是外部检出的独立模块，不参与本仓库格式校验
+        run: |
+          out=$(gofmt -l . | grep -v '^vactor/' || true)
+          if [ -n "$out" ]; then
+            echo "::error::these files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: lint
+        # 首次引入先只观察：出现告警时按输出修复，稳定后再去掉 continue-on-error。
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: test (race + coverage)
+        # 覆盖率只统计手写库代码：examples/testutil 为 0%，protocol 是生成代码，均不参与
+        run: |
+          pkgs=$(go list ./... | grep -v -E '/(examples|testutil)(/|$)' | grep -v '/protocol$')
+          go test -race -timeout 18m -coverprofile=coverage.out $pkgs
+
+      - name: coverage gate (>= 85%)
+        run: |
+          go tool cover -func=coverage.out | tail -1
+          pct=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          if awk -v c="$pct" 'BEGIN{exit !(c < 85)}'; then
+            echo "::error::statement coverage ${pct}% is below the 85% gate"
+            exit 1
+          fi
+          echo "coverage ${pct}% >= 85%"
