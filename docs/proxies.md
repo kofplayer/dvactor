@@ -14,11 +14,11 @@
 system.Request(远程 ref)
   → Router 发现目标非本机
   → 本地投递给 RequestProxy actor（ActorId = "<目标type>-<目标id>"），消息为 OuterRequest{ToActorRef, Message, RspChan}
-  → RequestProxy.OnMessage: ctx.RequestAsync(真实目标, msg, 0, 回调)
+  → RequestProxy.OnMessage: ctx.RequestAsync(真实目标, msg, 代理超时, 回调)
   → 回调中把结果写入 RspChan → system.Request 的调用方拿到响应
 ```
 
-即"系统外同步请求"被转换为"代理 actor 的异步请求 + channel 回传"。RequestAsync 用 timeout=0 是因为超时控制在调用方 `system.Request` 一侧。
+即"系统外同步请求"被转换为"代理 actor 的异步请求 + channel 回传"。代理超时 = 调用方时限 + 5s 余量（保证代理总是晚于调用方超时）；调用方未设时限时退回默认兜底值 `RequestProxyTimeout`(30s)，防止目标永不应答时代理 actor 无法回收。
 
 ## WatchProxy（[watch_proxy.go](../watch_proxy.go)，ActorType = 12）
 
@@ -33,6 +33,6 @@ system.Request(远程 ref)
 
 辅助函数 `GetWatcheeActorRef`（`router.go`）：从 WatchProxy 自己的 ActorId（`"<type>-<id>"`）反解出 watchee 的 ActorRef——**这依赖 ActorId 中不含 `-` 之前的歧义**，是 `SplitN(s, "-", 2)` 约定。
 
-## 已知缺陷
+## 断线重连自愈
 
-节点断线重连后，WatchProxy 对远程 watchee 的 watch 关系不会自动重建（见 [../todo.md](../todo.md)）。修复方向：重连成功后遍历本机 WatchProxy 重新发起 watch。
+本机 WatchProxy 在启动/停止时向 `system.watchProxies` 登记表注册（key=代理引用，value=watchee 引用）。与某系统的连接重新建立后（client 侧注册成功、server 侧收到重新注册都会触发 `onSystemReconnected`），系统向所有以该系统为 watchee 的代理投递 `watchProxyRefresh` 消息，代理对当前仍有订阅者的 WatchType 重新发起 `ctx.Watch`（watchee 侧按 watcher 引用去重，幂等）。由此自愈两类问题：分区期间发出的订阅（watch 信封发送失败被静默丢弃）、对端节点重启丢失的订阅关系。回归测试见 `lifecycle_test.go` 的 `TestClusterWatchSubscriptionSurvivesPartition`。

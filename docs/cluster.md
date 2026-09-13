@@ -18,7 +18,11 @@
 
 1. 若本节点不是列表末尾 → 启动 `clusterServer`（[cluster_server.go](../cluster_server.go)）监听本地 Port；
 2. 若本节点不是列表开头 → 对每个前序节点启动 `clusterClient`（[cluster_client.go](../cluster_client.go)）；
-3. **阻塞轮询** `connectedSystemCount >= systemCount`（每 3 秒打印等待日志）后返回 —— 即集群未全员互连前 `Start()` 不会返回。
+3. **阻塞轮询** `connectedSystemCount >= systemCount`（每 3 秒打印等待日志）后返回 —— 即集群未全员互连前 `Start()` 不会返回。`ClusterConfig.ConnectTimeout > 0` 时超时返回错误；错误经 `ClusterStartError()` 暴露给调用方（`Start()` 本身不返回值，只记日志）。监听端口被占等 bind 失败会立即以错误返回，不再被吞进后台日志。
+
+配置在 `NewSystem` 时校验（本地节点必须在列表中、SystemId 不得重复、多节点必须配置端口），无效配置直接 panic。
+
+**注册鉴权**：`ClusterConfig.AuthToken` 非空时，client 注册请求必须携带相同 token，server 校验失败即拒绝并关闭会话（client 按退避重试、持续被拒）。token 防止任意进程冒充节点接入，但不提供机密性（明文传输），跨公网部署需配合 TLS 或网络层隔离。
 
 注册握手（client → server）：
 
@@ -26,15 +30,18 @@
 client: 连接成功 → 发 PkgRegisterSystemReq{SystemId: 本节点ID}
 server: 校验 SystemId 存在且非 passive（防止方向反了）、未重复注册
         → session 绑定 systemInfo → connectedSystemCount+1 → 回 PkgRegisterSystemRsp{Success}
-client: 收到 Rsp → systemInfo.cli 就绪 → connectedSystemCount+1
+client: 收到 Rsp → systemInfo.cli 就绪 → connectedSystemCount+1（等待响应带 10s 超时，防止响应丢失永久挂起）
 ```
+
+注册成功（client 收到 Rsp、server 完成绑定）都会触发 `onSystemReconnected`，驱动本机 WatchProxy 刷新 watch（见 [proxies.md](proxies.md)）。
 
 ## 断线与重连
 
 - client 侧：断线回调触发重连循环，**每 5 秒**重试（连接失败/注册失败同样 5 秒退避）。
 - server 侧：断线时清理 session 绑定并 `connectedSystemCount-1`。
 - 发送时对端不在线返回 `ErrorCodeMessageSendFail`（消息直接失败，无缓冲重投）。
-- 已知缺陷：重连后 WatchProxy 的 watch 关系不会自动恢复，见 [../todo.md](../todo.md)。
+- server 侧因消息处理错误关闭会话时，本侧断线回调必然触发、绑定被同步清理（机制见 [engine.md](engine.md)），对端重连即可恢复，不会出现旧绑定残留导致的永久拒绝。
+- 心跳与读超时见 [protocol.md](protocol.md)：半开连接在 `HeartbeatTimeout` 内被检测并进入重连。
 
 ## 发送路径
 
@@ -47,6 +54,8 @@ envelope → Router.Router（router.go）
 ```
 
 接收路径：`clusterNet.OnMessage` 按 PkgType 反序列化 → 还原 vactor envelope → `localSystem.LocalRouter` 投入本地调度。**注意：入向消息一律走 LocalRouter，不再经过集群 Router**（目标已是本机）。
+
+停机：`dvactor.System.Stop()` 先 `clusterNet.stop()`（终止重连循环、关闭监听与全部会话），再执行 vactor 的 actor 层停机，幂等且在有限时间内返回。
 
 ## 错误码（[error.go](../error.go)）
 

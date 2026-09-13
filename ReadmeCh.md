@@ -15,8 +15,14 @@ dvactor 是 [vactor](https://github.com/kofplayer/vactor) 的一个分布式扩�
 
 - 集群中所有节点的拓扑配置在集群启动时确定，中途不能做修改。如果需要修改，就要先关闭整个集群。所以集群不支持运行时动态的添加和移除节点。
 
+## 接入鉴权
+
+- 在所有节点配置相同的 `ClusterConfig.AuthToken`，注册请求 token 不匹配将被拒绝，防止任意进程冒充节点接入集群。
+- token 为明文准入校验，不提供机密性；跨公网部署请配合 TLS 或网络层隔离。
+
+
 ## 安装
-d
+
 ```sh
 go get github.com/kofplayer/dvactor
 ```

@@ -17,6 +17,12 @@ dvactor is a distributed extension of [vactor](https://github.com/kofplayer/vact
 
 - The topology configuration of all nodes in the cluster is determined at cluster startup and cannot be modified during runtime. If changes are needed, the entire cluster must be shut down first. Therefore, the cluster does not support dynamic addition or removal of nodes at runtime.
 
+## Authentication
+
+- Set the same `ClusterConfig.AuthToken` on every node; register requests without a matching token are rejected, preventing unauthorized processes from joining the cluster.
+- The token is a plaintext admission check only — it does not provide confidentiality. Use TLS or network isolation for deployments across the public internet.
+
+
 
 ## Installation
 
