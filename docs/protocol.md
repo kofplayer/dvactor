@@ -24,7 +24,7 @@
 |---------|----------|---------------------|
 | 1 EnvelopeSend | PkgEnvelopeSend | EnvelopeSend |
 | 2 EnvelopeBatchSend | PkgEnvelopeBatchSend | EnvelopeBatchSend |
-| 3 EnvelopeRequestAsync | PkgEnvelopeRequestAsync | EnvelopeRequestAsync（含 CallbackId/CallbackAddress） |
+| 3 EnvelopeRequestAsync | PkgEnvelopeRequestAsync | EnvelopeRequestAsync（含 CallbackId/CallbackAddress，均为 uint64） |
 | 4 EnvelopeResponseAsync | PkgEnvelopeResponseAsync | EnvelopeResponseAsync |
 | 5 EnvelopeRequest | PkgEnvelopeRequest | EnvelopeRequest |
 | 6 EnvelopeResponse | PkgEnvelopeResponse | EnvelopeResponse |
@@ -33,6 +33,9 @@
 | 9 EnvelopeFireNotify | PkgEnvelopeFireNotify | EnvelopeFireNotify |
 | 10 RegisterSystemReq | PkgRegisterSystemReq | 集群注册（含 AuthToken，[握手流程](cluster.md)） |
 | 11 RegisterSystemRsp | PkgRegisterSystemRsp | 集群注册 |
+
+> 序号类字段（`RequestId` / `CallbackId` / `CallbackAddress`）在线协议中均为 **uint64**：
+> 单调递增的序号若用 32 位，会在约 40 亿次请求后回绕，长跑进程可能因此把新回调与残留条目混淆。
 
 **不可跨节点的信封**：`EnvelopeOuterRequest`、`EnvelopeOuterWatch`（含 channel/队列指针，由 Router 转给本地代理处理，见 [proxies.md](proxies.md)）、以及 vactor 内部的 `envelopeTick`/`envelopeStopedReport`——走 `default` 分支会报 `ErrorCodeUnknownEnvelope`。
 

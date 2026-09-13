@@ -22,7 +22,7 @@
 
 配置在 `NewSystem` 时校验（本地节点必须在列表中、SystemId 不得重复、多节点必须配置端口），无效配置直接 panic。
 
-**注册鉴权**：`ClusterConfig.AuthToken` 非空时，client 注册请求必须携带相同 token，server 校验失败即拒绝并关闭会话（client 按退避重试、持续被拒）。token 防止任意进程冒充节点接入，但不提供机密性（明文传输），跨公网部署需配合 TLS 或网络层隔离。
+**注册鉴权**：`ClusterConfig.AuthToken` 非空时，client 注册请求必须携带相同 token。server 校验失败时先回带 `ErrorCodeAuthFailed`(108) 的注册响应、再关闭会话，client 收到该错误码立即判定失败并进入退避重试——避免在没有响应的情况下白等 `registerResponseTimeout`（10s）。token 防止任意进程冒充节点接入，但不提供机密性（明文传输），跨公网部署需配合 TLS 或网络层隔离。
 
 注册握手（client → server）：
 

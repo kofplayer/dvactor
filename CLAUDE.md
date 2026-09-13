@@ -8,8 +8,9 @@
 - **Actor 放置**：`CreateActorRef` 未指定 SystemId 时，按 ActorId 哈希在**声明了该 ActorType 的节点**中选一个放置；`CreateActorRefEx` 指定 SystemId 时直接发往该节点（此时同 type+id 的 actor 可多节点并存）。算法见 `router.go` 的 `CreateActorRefEx`。
 - **拓扑静态**：集群拓扑在启动时由 `ClusterConfig` 确定，运行期不可增删节点；无效配置在 `NewSystem` 时直接 panic。
 - **序列化**：跨节点消息必须是 protobuf 消息，且需先 `RegisterMessageType(msgType, creator)` 注册；纯本机消息不受限。
-- **接入鉴权**：`ClusterConfig.AuthToken` 为共享密钥，非空时注册请求必须携带，防止任意进程冒充节点接入。
+- **接入鉴权**：`ClusterConfig.AuthToken` 为共享密钥，非空时注册请求必须携带，防止任意进程冒充节点接入。校验失败时 server 先回带 `ErrorCodeAuthFailed`(108) 的响应再断开，client 据此立即失败重试（而不是白等注册响应超时 10s）。
 - **组网**：按 `SystemConfigs` 列表顺序构成全互联（方向规则见 [docs/cluster.md](docs/cluster.md)）；启动阻塞至全部互连。
+- **监听地址**：`SystemConfig.Host` 是**其他节点连接本节点**用的地址（client 侧目标）；本机监听网卡由 `ListenHost` 决定，为空表示监听所有网卡（0.0.0.0），可设为 `127.0.0.1` 之类限制暴露面。
 
 ## 关键约束与陷阱
 
@@ -31,7 +32,7 @@
 | [cluster_server.go](cluster_server.go) | 监听侧：注册鉴权、会话绑定、断线清理、同步感知端口绑定结果 |
 | [watch_proxy.go](watch_proxy.go) | `WatchProxy`（ActorType=12）：跨节点 watch/event 的本地代理，聚合订阅、回源转发、重连刷新 |
 | [request_proxy.go](request_proxy.go) | `RequestProxy`（ActorType=11）：把"系统外发起的跨节点 Request"转为 actor 间 RequestAsync |
-| [error.go](error.go) | 分布式错误码 101~106（码表见 [docs/cluster.md](docs/cluster.md)）；本模块自定义码从 `ErrorCodeCustomStart`(200) 起 |
+| [error.go](error.go) | 分布式错误码 101~108（含 `ErrorCodeUnknownSystem` 107、`ErrorCodeAuthFailed` 108；码表见 [docs/cluster.md](docs/cluster.md)）；本模块自定义码从 `ErrorCodeCustomStart`(200) 起 |
 | [protocol/](protocol/) | [cluster.proto](protocol/cluster.proto) 与生成代码；`gen_proto.bat` 重新生成 |
 | [engine/](engine/) | 网络基础设施（TCP 传输、帧协议、心跳），细节见 [docs/engine.md](docs/engine.md) |
 | [testutil/](testutil/) | 进程内 N 节点集群测试 harness（见下） |
