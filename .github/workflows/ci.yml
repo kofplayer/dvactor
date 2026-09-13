@@ -77,11 +77,11 @@ jobs:
           fi
 
       - name: lint
-        # 首次引入先只观察：出现告警时按输出修复，稳定后再去掉 continue-on-error。
-        continue-on-error: true
-        uses: golangci/golangci-lint-action@v6
+        # 版本固定为 v2.13.2：本地已用它跑通（0 issues）。若写 latest，
+        # CI 侧升级后新增的默认规则会变成"本地绿、CI 红"且难以本地复现。
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
 
       - name: test (race + coverage)
         # 覆盖率只统计手写库代码：examples/testutil 为 0%，protocol 是生成代码，均不参与
