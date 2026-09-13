@@ -5,7 +5,7 @@
 ## 集群模型速览
 
 - **接入方式**：通过 vactor 的两个扩展钩子注入——`SetRouter`（集群路由）与 `SetCreateActorRefExFunc`（哈希寻址），见 `system.go` 的 `NewSystem`。
-- **Actor 放置**：`CreateActorRef` 未指定 SystemId 时，按 ActorId 哈希在**声明了该 ActorType 的节点**中选一个放置；`CreateActorRefEx` 指定 SystemId 时直接发往该节点（此时同 type+id 的 actor 可多节点并存）。算法见 `router.go` 的 `CreateActorRefEx`。
+- **Actor 放置**：`CreateActorRef` 未指定 SystemId 时，按 ActorId 哈希（vactor 导出的 `HashActorId`，32 位 FNV-1a，与单机分片共用同一函数）在**声明了该 ActorType 的节点**中选一个放置；`CreateActorRefEx` 指定 SystemId 时直接发往该节点（此时同 type+id 的 actor 可多节点并存）。算法见 `router.go` 的 `CreateActorRefEx`。
 - **拓扑静态**：集群拓扑在启动时由 `ClusterConfig` 确定，运行期不可增删节点；无效配置在 `NewSystem` 时直接 panic。
 - **序列化**：跨节点消息必须是 protobuf 消息，且需先 `RegisterMessageType(msgType, creator)` 注册；纯本机消息不受限。
 - **接入鉴权**：`ClusterConfig.AuthToken` 为共享密钥，非空时注册请求必须携带，防止任意进程冒充节点接入。校验失败时 server 先回带 `ErrorCodeAuthFailed`(108) 的响应再断开，client 据此立即失败重试（而不是白等注册响应超时 10s）。
