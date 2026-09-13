@@ -21,7 +21,7 @@ type SessionMgr interface {
 type sessionMgr struct {
 	lock     sync.RWMutex
 	sessions map[SessionID]*netSession
-	genUId   atomic.Uint32
+	genUId   atomic.Uint64
 }
 
 func (m *sessionMgr) NewSession() NetSession {

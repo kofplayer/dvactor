@@ -4,9 +4,8 @@ import (
 	netConnect "github.com/kofplayer/dvactor/engine/net/connect"
 )
 
-type SessionID uint32
-
-const SessionIDSize = 4
+// SessionID 会话编号。取 uint64：uint32 在长跑进程中回绕后会与新会话撞号。
+type SessionID uint64
 
 type SendMessageFunc func(msgId uint32, data []byte) error
 

@@ -125,6 +125,11 @@ func (wp *WatchProxy) isWatch(watchType vactor.WatchType) bool {
 }
 
 func (wp *WatchProxy) updateInnerWatch(ctx vactor.EnvelopeContext, watchType vactor.WatchType, isWatch bool, watcher vactor.ActorRef) {
+	w, isImpl := watcher.(*vactor.ActorRefImpl)
+	if !isImpl {
+		ctx.LogError("watch proxy ignore unsupported ActorRef implementation %T", watcher)
+		return
+	}
 	oldIsWatch := wp.isWatch(watchType)
 	watchers, ok := wp.watcherss[watchType]
 	if isWatch {
@@ -132,13 +137,11 @@ func (wp *WatchProxy) updateInnerWatch(ctx vactor.EnvelopeContext, watchType vac
 			watchers = make(map[vactor.ActorRefImpl]bool)
 			wp.watcherss[watchType] = watchers
 		}
-		w := watcher.(*vactor.ActorRefImpl)
 		if _, ok = watchers[*w]; !ok {
 			watchers[*w] = true
 		}
 	} else {
 		if ok {
-			w := watcher.(*vactor.ActorRefImpl)
 			if _, ok := watchers[*w]; ok {
 				delete(watchers, *w)
 				if len(watchers) == 0 {

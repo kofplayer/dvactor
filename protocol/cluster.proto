@@ -10,6 +10,9 @@ enum ErrorCode {
   	ErrorCodeInvalidActor = 2;
   	ErrorCodeSystemNotStarted = 3;
   	ErrorCodeHandlerPanic = 4;
+  	// 注册握手阶段错误：server 回带该码后断开，client 据此立即重试
+  	// （数值与 dvactor.ErrorCodeAuthFailed = ErrorCodeCustomStart + 8 对齐）
+  	ErrorCodeAuthFailed = 108;
 }
 
 enum PkgType {
@@ -55,7 +58,7 @@ message PkgEnvelopeRequestAsync {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Message Message = 3;
-	uint32 CallbackId = 4;
+	uint64 CallbackId = 4;
 	uint64 CallbackAddress = 5;
 }
 
@@ -68,7 +71,7 @@ message PkgEnvelopeResponseAsync {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Response Response = 3;
-	uint32 CallbackId = 4;
+	uint64 CallbackId = 4;
 	uint64 CallbackAddress = 5;
 }
 
@@ -76,14 +79,14 @@ message PkgEnvelopeRequest {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Message Message = 3;
-	uint32 RequestId = 4;
+	uint64 RequestId = 4;
 }
 
 message PkgEnvelopeResponse {
 	ActorRef FromActorRef = 1;
 	ActorRef ToActorRef = 2;
 	Response Response = 3;
-	uint32 RequestId = 4;
+	uint64 RequestId = 4;
 }
 
 message PkgEnvelopeWatch {

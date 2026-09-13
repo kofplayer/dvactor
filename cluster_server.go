@@ -52,6 +52,13 @@ func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data 
 		// 鉴权：配置了共享密钥时，token 不匹配的注册直接拒绝（会话随即关闭）
 		if token := svr.cn.clusterConfig.AuthToken; token != "" && req.GetAuthToken() != token {
 			svr.cn.localSystem.LogError("system %v register rejected: auth token mismatch", req.SystemId)
+			// 先回带错误码的响应再断开：让 client 立即失败重试，
+			// 而不是白等 registerResponseTimeout（10s）才察觉。
+			if rspData, err := proto.Marshal(&protocol.PkgRegisterSystemRsp{
+				ErrorCode: protocol.ErrorCode_ErrorCodeAuthFailed,
+			}); err == nil {
+				_ = s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), rspData)
+			}
 			return fmt.Errorf("systemId %v auth rejected", req.SystemId)
 		}
 		info, ok := svr.cn.systemInfos[vactor.SystemId(req.SystemId)]
@@ -118,7 +125,8 @@ func NewServer(cn *clusterNet) *clusterServer {
 	port := cn.systemInfos[cn.clusterConfig.LocalSystemId].config.Port
 	svr.svr = netServer.NewNetServer()
 	svr.acceptor = socketNetConnect.NewAcceptor()
-	svr.acceptor.SetAddress("", port)
+	// ListenHost 为空时监听所有网卡（保持旧行为）
+	svr.acceptor.SetAddress(cn.systemInfos[cn.clusterConfig.LocalSystemId].config.ListenHost, port)
 	svr.svr.SetAcceptor(svr.acceptor)
 	svr.svr.SetOnConnect(svr.OnConnect)
 	svr.svr.SetOnDisconnect(func(s netSession.NetSession) {

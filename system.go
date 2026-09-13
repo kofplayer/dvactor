@@ -82,9 +82,13 @@ func validateClusterConfig(clusterConfig *ClusterConfig) error {
 }
 
 type SystemConfig struct {
-	SystemId   vactor.SystemId
-	Host       string
-	Port       uint16
+	SystemId vactor.SystemId
+	// Host 是其他节点连接本节点时使用的地址（client 侧目标地址）。
+	Host string
+	Port uint16
+	// ListenHost 是本节点监听的网卡地址：空表示监听所有网卡（0.0.0.0），
+	// 可设为 "127.0.0.1" 之类的回环地址以限制暴露面。
+	ListenHost string
 	ActorTypes []vactor.ActorType
 }
 
@@ -108,6 +112,10 @@ type system struct {
 	msgTypesLock sync.RWMutex
 	msgTypeIds   map[reflect.Type]uint32
 	msgCreators  map[uint32]func() proto.Message
+	// 类型解析缓存：序列化/反序列化是每条跨节点消息的必经路径，
+	// 用无锁缓存避开反射 + RWMutex 的重复开销（注册时失效）。
+	msgTypeCache    sync.Map // reflect.Type -> uint32
+	msgCreatorCache sync.Map // uint32 -> func() proto.Message
 
 	// clusterStartErr 记录 Start() 阶段集群组网的错误，经 ClusterStartError() 暴露。
 	clusterStartErr error
@@ -206,6 +214,9 @@ func (s *system) RegisterMessageType(msgType uint32, creator func() proto.Messag
 	}
 	s.msgTypeIds[msgReflectType] = msgType
 	s.msgCreators[msgType] = creator
+	// 覆盖注册后让缓存失效，避免读到旧的解析结果
+	s.msgTypeCache.Delete(msgReflectType)
+	s.msgCreatorCache.Delete(msgType)
 }
 
 func (s *system) MarshalMessage(msg interface{}) (*protocol.Message, vactor.VAError) {
@@ -214,12 +225,20 @@ func (s *system) MarshalMessage(msg interface{}) (*protocol.Message, vactor.VAEr
 		s.LogError("msg %v is not proto message", reflect.TypeOf(msg))
 		return nil, vactor.NewVAError(ErrorCodeMessageCannotSerialize)
 	}
-	s.msgTypesLock.RLock()
-	msgType, ok := s.msgTypeIds[reflect.TypeOf(msg)]
-	s.msgTypesLock.RUnlock()
-	if !ok {
-		s.LogError("can not find msg type")
-		return nil, vactor.NewVAError(ErrorCodeMessageNotRegister)
+	rt := reflect.TypeOf(msg)
+	var msgType uint32
+	if cached, hit := s.msgTypeCache.Load(rt); hit {
+		msgType = cached.(uint32)
+	} else {
+		s.msgTypesLock.RLock()
+		found, exists := s.msgTypeIds[rt]
+		s.msgTypesLock.RUnlock()
+		if !exists {
+			s.LogError("can not find msg type %v", rt)
+			return nil, vactor.NewVAError(ErrorCodeMessageNotRegister)
+		}
+		msgType = found
+		s.msgTypeCache.Store(rt, found)
 	}
 	data, err := proto.Marshal(protoMsg)
 	if err != nil {
@@ -238,11 +257,18 @@ func (s *system) UnmarshalMessage(protoMsg *protocol.Message) (interface{}, erro
 	if protoMsg == nil {
 		return nil, errors.New("nil message")
 	}
-	s.msgTypesLock.RLock()
-	creator, ok := s.msgCreators[protoMsg.Type]
-	s.msgTypesLock.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("can not find msg type %v creator", protoMsg.Type)
+	var creator func() proto.Message
+	if cached, hit := s.msgCreatorCache.Load(protoMsg.Type); hit {
+		creator = cached.(func() proto.Message)
+	} else {
+		s.msgTypesLock.RLock()
+		found, exists := s.msgCreators[protoMsg.Type]
+		s.msgTypesLock.RUnlock()
+		if !exists {
+			return nil, fmt.Errorf("can not find msg type %v creator", protoMsg.Type)
+		}
+		creator = found
+		s.msgCreatorCache.Store(protoMsg.Type, found)
 	}
 	msg := creator()
 	if err := proto.Unmarshal(protoMsg.Data, msg); err != nil {

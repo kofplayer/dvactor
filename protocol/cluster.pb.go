@@ -30,16 +30,20 @@ const (
 	ErrorCode_ErrorCodeInvalidActor     ErrorCode = 2
 	ErrorCode_ErrorCodeSystemNotStarted ErrorCode = 3
 	ErrorCode_ErrorCodeHandlerPanic     ErrorCode = 4
+	// 注册握手阶段错误：server 回带该码后断开，client 据此立即重试
+	// （数值与 dvactor.ErrorCodeAuthFailed = ErrorCodeCustomStart + 8 对齐）
+	ErrorCode_ErrorCodeAuthFailed ErrorCode = 108
 )
 
 // Enum value maps for ErrorCode.
 var (
 	ErrorCode_name = map[int32]string{
-		0: "ErrorCodeSuccess",
-		1: "ErrorCodeTimeout",
-		2: "ErrorCodeInvalidActor",
-		3: "ErrorCodeSystemNotStarted",
-		4: "ErrorCodeHandlerPanic",
+		0:   "ErrorCodeSuccess",
+		1:   "ErrorCodeTimeout",
+		2:   "ErrorCodeInvalidActor",
+		3:   "ErrorCodeSystemNotStarted",
+		4:   "ErrorCodeHandlerPanic",
+		108: "ErrorCodeAuthFailed",
 	}
 	ErrorCode_value = map[string]int32{
 		"ErrorCodeSuccess":          0,
@@ -47,6 +51,7 @@ var (
 		"ErrorCodeInvalidActor":     2,
 		"ErrorCodeSystemNotStarted": 3,
 		"ErrorCodeHandlerPanic":     4,
+		"ErrorCodeAuthFailed":       108,
 	}
 )
 
@@ -398,7 +403,7 @@ type PkgEnvelopeRequestAsync struct {
 	FromActorRef    *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
 	ToActorRef      *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
 	Message         *Message               `protobuf:"bytes,3,opt,name=Message,proto3" json:"Message,omitempty"`
-	CallbackId      uint32                 `protobuf:"varint,4,opt,name=CallbackId,proto3" json:"CallbackId,omitempty"`
+	CallbackId      uint64                 `protobuf:"varint,4,opt,name=CallbackId,proto3" json:"CallbackId,omitempty"`
 	CallbackAddress uint64                 `protobuf:"varint,5,opt,name=CallbackAddress,proto3" json:"CallbackAddress,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -455,7 +460,7 @@ func (x *PkgEnvelopeRequestAsync) GetMessage() *Message {
 	return nil
 }
 
-func (x *PkgEnvelopeRequestAsync) GetCallbackId() uint32 {
+func (x *PkgEnvelopeRequestAsync) GetCallbackId() uint64 {
 	if x != nil {
 		return x.CallbackId
 	}
@@ -526,7 +531,7 @@ type PkgEnvelopeResponseAsync struct {
 	FromActorRef    *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
 	ToActorRef      *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
 	Response        *Response              `protobuf:"bytes,3,opt,name=Response,proto3" json:"Response,omitempty"`
-	CallbackId      uint32                 `protobuf:"varint,4,opt,name=CallbackId,proto3" json:"CallbackId,omitempty"`
+	CallbackId      uint64                 `protobuf:"varint,4,opt,name=CallbackId,proto3" json:"CallbackId,omitempty"`
 	CallbackAddress uint64                 `protobuf:"varint,5,opt,name=CallbackAddress,proto3" json:"CallbackAddress,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -583,7 +588,7 @@ func (x *PkgEnvelopeResponseAsync) GetResponse() *Response {
 	return nil
 }
 
-func (x *PkgEnvelopeResponseAsync) GetCallbackId() uint32 {
+func (x *PkgEnvelopeResponseAsync) GetCallbackId() uint64 {
 	if x != nil {
 		return x.CallbackId
 	}
@@ -602,7 +607,7 @@ type PkgEnvelopeRequest struct {
 	FromActorRef  *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
 	ToActorRef    *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
 	Message       *Message               `protobuf:"bytes,3,opt,name=Message,proto3" json:"Message,omitempty"`
-	RequestId     uint32                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
+	RequestId     uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -658,7 +663,7 @@ func (x *PkgEnvelopeRequest) GetMessage() *Message {
 	return nil
 }
 
-func (x *PkgEnvelopeRequest) GetRequestId() uint32 {
+func (x *PkgEnvelopeRequest) GetRequestId() uint64 {
 	if x != nil {
 		return x.RequestId
 	}
@@ -670,7 +675,7 @@ type PkgEnvelopeResponse struct {
 	FromActorRef  *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
 	ToActorRef    *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
 	Response      *Response              `protobuf:"bytes,3,opt,name=Response,proto3" json:"Response,omitempty"`
-	RequestId     uint32                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
+	RequestId     uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -726,7 +731,7 @@ func (x *PkgEnvelopeResponse) GetResponse() *Response {
 	return nil
 }
 
-func (x *PkgEnvelopeResponse) GetRequestId() uint32 {
+func (x *PkgEnvelopeResponse) GetRequestId() uint64 {
 	if x != nil {
 		return x.RequestId
 	}
@@ -1089,7 +1094,7 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"ToActorRef\x12+\n" +
 	"\aMessage\x18\x03 \x01(\v2\x11.protocol.MessageR\aMessage\x12\x1e\n" +
 	"\n" +
-	"CallbackId\x18\x04 \x01(\rR\n" +
+	"CallbackId\x18\x04 \x01(\x04R\n" +
 	"CallbackId\x12(\n" +
 	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"j\n" +
 	"\bResponse\x121\n" +
@@ -1102,7 +1107,7 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"ToActorRef\x12.\n" +
 	"\bResponse\x18\x03 \x01(\v2\x12.protocol.ResponseR\bResponse\x12\x1e\n" +
 	"\n" +
-	"CallbackId\x18\x04 \x01(\rR\n" +
+	"CallbackId\x18\x04 \x01(\x04R\n" +
 	"CallbackId\x12(\n" +
 	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"\xcb\x01\n" +
 	"\x12PkgEnvelopeRequest\x126\n" +
@@ -1111,14 +1116,14 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"ToActorRef\x18\x02 \x01(\v2\x12.protocol.ActorRefR\n" +
 	"ToActorRef\x12+\n" +
 	"\aMessage\x18\x03 \x01(\v2\x11.protocol.MessageR\aMessage\x12\x1c\n" +
-	"\tRequestId\x18\x04 \x01(\rR\tRequestId\"\xcf\x01\n" +
+	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\"\xcf\x01\n" +
 	"\x13PkgEnvelopeResponse\x126\n" +
 	"\fFromActorRef\x18\x01 \x01(\v2\x12.protocol.ActorRefR\fFromActorRef\x122\n" +
 	"\n" +
 	"ToActorRef\x18\x02 \x01(\v2\x12.protocol.ActorRefR\n" +
 	"ToActorRef\x12.\n" +
 	"\bResponse\x18\x03 \x01(\v2\x12.protocol.ResponseR\bResponse\x12\x1c\n" +
-	"\tRequestId\x18\x04 \x01(\rR\tRequestId\"\xb6\x01\n" +
+	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\"\xb6\x01\n" +
 	"\x10PkgEnvelopeWatch\x126\n" +
 	"\fFromActorRef\x18\x01 \x01(\v2\x12.protocol.ActorRefR\fFromActorRef\x122\n" +
 	"\n" +
@@ -1149,13 +1154,14 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"\bSystemId\x18\x01 \x01(\rR\bSystemId\x12\x1c\n" +
 	"\tAuthToken\x18\x02 \x01(\tR\tAuthToken\"I\n" +
 	"\x14PkgRegisterSystemRsp\x121\n" +
-	"\tErrorCode\x18\x01 \x01(\x0e2\x13.protocol.ErrorCodeR\tErrorCode*\x8c\x01\n" +
+	"\tErrorCode\x18\x01 \x01(\x0e2\x13.protocol.ErrorCodeR\tErrorCode*\xa5\x01\n" +
 	"\tErrorCode\x12\x14\n" +
 	"\x10ErrorCodeSuccess\x10\x00\x12\x14\n" +
 	"\x10ErrorCodeTimeout\x10\x01\x12\x19\n" +
 	"\x15ErrorCodeInvalidActor\x10\x02\x12\x1d\n" +
 	"\x19ErrorCodeSystemNotStarted\x10\x03\x12\x19\n" +
-	"\x15ErrorCodeHandlerPanic\x10\x04*\xdd\x02\n" +
+	"\x15ErrorCodeHandlerPanic\x10\x04\x12\x17\n" +
+	"\x13ErrorCodeAuthFailed\x10l*\xdd\x02\n" +
 	"\aPkgType\x12\x0f\n" +
 	"\vPkgTypeNone\x10\x00\x12\x17\n" +
 	"\x13PkgTypeEnvelopeSend\x10\x01\x12\x1c\n" +

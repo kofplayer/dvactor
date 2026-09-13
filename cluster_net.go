@@ -40,7 +40,11 @@ func ActorRefToProto(actorRef vactor.ActorRef) *protocol.ActorRef {
 	if actorRef == nil {
 		return nil
 	}
-	ref := actorRef.(*vactor.ActorRefImpl)
+	ref, isImpl := actorRef.(*vactor.ActorRefImpl)
+	if !isImpl {
+		// 非框架自建的 ActorRef 无法序列化：返回 nil，接收侧按"目标缺失"丢弃
+		return nil
+	}
 	return &protocol.ActorRef{
 		SystemId:  uint32(ref.SystemId),
 		GroupSlot: uint32(ref.GroupSlot),
@@ -204,12 +208,13 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			msg, err := cn.marshalMessage(message)
 			if err != nil {
 				cn.localSystem.LogError("MarshalMessage error: %v\n", err)
-				continue
+				// 整批拒绝：部分投递无法回滚，调用方也无从得知哪些到达了
+				return err
 			}
 			messages = append(messages, msg)
 		}
-		if len(messages) <= 0 {
-			cn.localSystem.LogError("no valid message can send")
+		if len(messages) == 0 {
+			cn.localSystem.LogError("batch send aborted: no message to send")
 			return vactor.NewVAError(ErrorCodeMessageLenError)
 		}
 		stringActorRefs := make([]*protocol.ActorRef, len(e.ToActorRefs))
@@ -232,7 +237,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef:    ActorRefToProto(e.FromActorRef),
 			ToActorRef:      ActorRefToProto(e.ToActorRef),
 			Message:         msg,
-			CallbackId:      uint32(e.CallbackId),
+			CallbackId:      uint64(e.CallbackId),
 			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeResponseAsync:
@@ -253,7 +258,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef:    ActorRefToProto(e.FromActorRef),
 			ToActorRef:      ActorRefToProto(e.ToActorRef),
 			Response:        rsp,
-			CallbackId:      uint32(e.CallbackId),
+			CallbackId:      uint64(e.CallbackId),
 			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeRequest:
@@ -266,7 +271,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef: ActorRefToProto(e.FromActorRef),
 			ToActorRef:   ActorRefToProto(e.ToActorRef),
 			Message:      msg,
-			RequestId:    uint32(e.RequestId),
+			RequestId:    uint64(e.RequestId),
 		}
 	case *vactor.EnvelopeResponse:
 		msg, err := cn.marshalMessage(e.Message)
@@ -286,7 +291,7 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			FromActorRef: ActorRefToProto(e.FromActorRef),
 			ToActorRef:   ActorRefToProto(e.ToActorRef),
 			Response:     rsp,
-			RequestId:    uint32(e.RequestId),
+			RequestId:    uint64(e.RequestId),
 		}
 	case *vactor.EnvelopeWatch:
 		msgId = uint32(protocol.PkgType_PkgTypeEnvelopeWatch)
