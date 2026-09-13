@@ -57,11 +57,31 @@ func (c *netClient) Connect() error {
 	c.connector.SetOnData(func(data []byte) error {
 		c.splitter.Append(data)
 		for {
-			msgId, payload, ok := c.splitter.Next()
+			msgId, payload, ok, err := c.splitter.Next()
+			if err != nil {
+				// 帧长非法，字节流已不可信，断开连接
+				return err
+			}
 			if !ok {
 				return nil
 			}
-			c.onMessage(msgId, payload)
+			// 引擎层心跳在回调前拦截，不进入业务层
+			if msgId == netConnect.HeartbeatMsgIdPing {
+				if pkt, err := netConnect.PackMessage(netConnect.HeartbeatMsgIdPong, nil); err == nil {
+					_ = c.connector.SendData(pkt)
+				}
+				continue
+			}
+			if msgId == netConnect.HeartbeatMsgIdPong {
+				continue
+			}
+			if c.onMessage == nil {
+				continue
+			}
+			if err := c.onMessage(msgId, payload); err != nil {
+				// 与 server 侧语义对齐：业务回调错误触发断线（由重连机制恢复）
+				return err
+			}
 		}
 	})
 	return c.connector.Connect()

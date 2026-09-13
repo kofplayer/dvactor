@@ -58,20 +58,44 @@ func (ns *netServer) Start() error {
 			return conn.SendData(pkt)
 		})
 		conn.SetOnDisconnect(func() {
-			ns.onDisconnect(s)
+			if ns.onDisconnect != nil {
+				ns.onDisconnect(s)
+			}
 			ns.sessionMgr.RemoveSession(s.GetID())
 		})
 		conn.SetOnData(func(data []byte) error {
 			splitter.Append(data)
 			for {
-				msgId, payload, ok := splitter.Next()
+				msgId, payload, ok, err := splitter.Next()
+				if err != nil {
+					// 帧长非法，字节流已不可信，断开连接
+					return err
+				}
 				if !ok {
 					return nil
 				}
-				ns.onMessage(s, msgId, payload)
+				// 引擎层心跳在回调前拦截，不进入业务层
+				if msgId == netConnect.HeartbeatMsgIdPing {
+					if pkt, err := netConnect.PackMessage(netConnect.HeartbeatMsgIdPong, nil); err == nil {
+						_ = conn.SendData(pkt)
+					}
+					continue
+				}
+				if msgId == netConnect.HeartbeatMsgIdPong {
+					continue
+				}
+				if ns.onMessage == nil {
+					continue
+				}
+				if err := ns.onMessage(s, msgId, payload); err != nil {
+					// 业务回调错误触发断线（clusterServer 依赖该语义，并可自行提前 Close）
+					return err
+				}
 			}
 		})
-		ns.onConnect(s)
+		if ns.onConnect != nil {
+			ns.onConnect(s)
+		}
 	})
 	return ns.acceptor.Start()
 }

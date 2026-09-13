@@ -9,6 +9,10 @@ import (
 const (
 	PacketHeaderSize = 5
 	MaxMsgId         = 0xFF
+	// MaxPacketSize 单帧 data 长度上限。长度字段直接采信对端，必须设上限：
+	// 否则恶意/损坏的字节流会先用超长长度把接收缓冲撑爆（内存耗尽），
+	// 极端值（如 0xFFFFFFFF）还会使 len+5 溢出导致切片越界 panic。
+	MaxPacketSize = 64 << 20
 )
 
 // PackMessage 打包一帧数据。msgId 超过 1 字节范围时返回错误（防止静默截断）。
@@ -34,16 +38,21 @@ func (p *PacketSplitter) Append(data []byte) {
 	p.buf = append(p.buf, data...)
 }
 
-// Next 尝试取下一帧。ok=false 表示数据不足，需等待更多字节。
-func (p *PacketSplitter) Next() (msgId uint32, payload []byte, ok bool) {
+// Next 尝试取下一帧。
+// ok=false 表示数据不足，需等待更多字节；
+// err!=nil 表示长度字段非法（超过 MaxPacketSize），字节流已不可信，调用方必须断开连接。
+func (p *PacketSplitter) Next() (msgId uint32, payload []byte, ok bool, err error) {
 	l := uint32(len(p.buf))
 	if l < PacketHeaderSize {
-		return 0, nil, false
+		return 0, nil, false, nil
 	}
 	dataLen := binary.BigEndian.Uint32(p.buf[0:4])
+	if dataLen > MaxPacketSize {
+		return 0, nil, false, fmt.Errorf("frame data length %d exceeds limit %d", dataLen, MaxPacketSize)
+	}
 	msgLen := dataLen + PacketHeaderSize
 	if l < msgLen {
-		return 0, nil, false
+		return 0, nil, false, nil
 	}
 	msgId = uint32(p.buf[4])
 	payload = p.buf[PacketHeaderSize:msgLen]
@@ -51,5 +60,5 @@ func (p *PacketSplitter) Next() (msgId uint32, payload []byte, ok bool) {
 	if len(p.buf) == 0 {
 		p.buf = nil // 释放底层数组，避免长连接内存驻留
 	}
-	return msgId, payload, true
+	return msgId, payload, true, nil
 }

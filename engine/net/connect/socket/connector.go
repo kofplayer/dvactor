@@ -37,7 +37,10 @@ func (this *ConnectorSocket) Connect() error {
 	this.ConnSocket.conn = conn
 	go this.receiverRun()
 	go this.senderRun()
-	this.onConnectFunc()
+	go this.heartbeatRun()
+	if this.onConnectFunc != nil {
+		this.onConnectFunc()
+	}
 	return nil
 }
 

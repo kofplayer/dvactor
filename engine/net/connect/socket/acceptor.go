@@ -15,17 +15,32 @@ func NewAcceptor() *AcceptorSocket {
 
 type AcceptorSocket struct {
 	onAcceptFunc netConnect.OnAcceptFunc
+	onListenFunc func(error)
 	host         string
 	port         uint16
 	listener     net.Listener
+}
+
+// SetOnListen 设置监听结果回调：Start 后回调一次，err 为 nil 表示已成功监听
+// 并进入 Accept 循环，否则为监听失败原因。用于上层同步感知端口绑定结果。
+func (this *AcceptorSocket) SetOnListen(f func(error)) {
+	this.onListenFunc = f
+}
+
+func (this *AcceptorSocket) notifyListen(err error) {
+	if this.onListenFunc != nil {
+		this.onListenFunc(err)
+	}
 }
 
 func (this *AcceptorSocket) Start() error {
 	var err error
 	this.listener, err = net.Listen("tcp", this.host+":"+strconv.Itoa(int(this.port)))
 	if err != nil {
+		this.notifyListen(err)
 		return err
 	}
+	this.notifyListen(nil)
 	for {
 		conn, err := this.listener.Accept()
 		if err != nil {
@@ -40,6 +55,7 @@ func (this *AcceptorSocket) Start() error {
 		this.onAcceptFunc(c)
 		go c.receiverRun()
 		go c.senderRun()
+		go c.heartbeatRun()
 	}
 }
 
