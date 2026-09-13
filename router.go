@@ -48,13 +48,10 @@ func (r *Router) CreateActorRefEx(systemId vactor.SystemId, actorType vactor.Act
 		ActorType: actorType,
 		ActorId:   actorId,
 	}
-	hashs := [4]uint8{0, 0, 0, 0}
+	// 与 vactor 的单机分片共用同一个哈希函数，否则同一 actor 在单机分层
+	// 与集群放置下会得到互不一致的落点。
+	hash := vactor.HashActorId(actorId)
 	systemIds := r.actorType2SystemIds[actorType]
-	endIndex := len(actorId) - 1
-	for i := range endIndex + 1 {
-		hashs[i%4] ^= actorId[endIndex-i]
-	}
-	hash := uint32(hashs[3])<<24 | uint32(hashs[2])<<16 | uint32(hashs[1])<<8 | uint32(hashs[0])
 	systemCount := uint32(len(systemIds))
 	if ref.SystemId == 0 {
 		if systemCount == 0 {
