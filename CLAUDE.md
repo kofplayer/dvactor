@@ -47,6 +47,8 @@
 
 `go test ./...` 覆盖消息注册与编解码、放置路由、双/三节点集群集成（send/request/watch/event/重连/鉴权/优雅停机）、engine 帧协议/socket 端到端。集群测试框架在 [testutil/](testutil/cluster.go)：进程内并发启动 N 节点全互联集群（临时端口 + 日志捕获）。测试约定：每个节点的 Register 必须注册该节点收发的**全部**消息类型。
 
+**CI 与依赖版本**：CI 使用的 vactor revision 固定在 [`.vactor-revision`](.vactor-revision)（原先从默认分支拉取，vactor 一提交 CI 结果就可能变）。改完 vactor 并本地跑通后，用 `git -C ../vactor rev-parse HEAD` 更新该文件。手动触发 `workflow_dispatch` 时可用 `vactor_ref` 输入临时覆盖，便于验证配合某个 vactor 分支/PR 是否可行。
+
 ## 深入阅读（L2）
 
 - [docs/cluster.md](docs/cluster.md) — 组网、注册握手与鉴权、重连、消息收发路径、错误码
