@@ -720,3 +720,41 @@ func TestClusterInnerSyncRequestTimeout(t *testing.T) {
 		t.Fatalf("expected timeout, got %v", err)
 	}
 }
+
+// ListenHost 指定回环地址后集群仍能正常互连与通信（配置生效且不破坏组网）。
+func TestClusterListenHostLoopback(t *testing.T) {
+	cfgs := dtu.BuildClusterConfig(t, 2, [][]vactor.ActorType{{clusterEchoType}, {clusterEchoType}})
+	for _, c := range cfgs {
+		c.ListenHost = "127.0.0.1"
+	}
+	reg := func(s dvactor.ClusterSystem) {
+		registerMsgTypes(s)
+		registerEcho(s)
+	}
+	nodes := make([]dvactor.ClusterSystem, 2)
+	for i := 0; i < 2; i++ {
+		_, nodes[i] = dtu.NewNode(t, vactor.SystemId(i+1), cfgs, 5*time.Second, reg)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func(s dvactor.ClusterSystem) {
+			defer wg.Done()
+			s.Start()
+		}(nodes[i])
+	}
+	wg.Wait()
+	for i, n := range nodes {
+		if err := n.ClusterStartError(); err != nil {
+			t.Fatalf("node %d failed to join with ListenHost set: %v", i+1, err)
+		}
+	}
+	n1 := nodes[0]
+	rsp, err := n1.Request(n1.CreateActorRef(clusterEchoType, "e"), newStrValMsg("ping"), clusterTestTimeout)
+	if err != nil {
+		t.Fatalf("cross-node request: %v", err)
+	}
+	if got := rsp.(*wrapperspb.StringValue).GetValue(); got != "echo:ping" {
+		t.Fatalf("rsp = %q", got)
+	}
+}

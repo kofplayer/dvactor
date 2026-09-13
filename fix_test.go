@@ -1,6 +1,7 @@
 package dvactor
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -364,5 +365,220 @@ func TestClusterNetOnMessageHandlesEveryPkgType(t *testing.T) {
 	// 未知包类型：只记日志，不报错、不 panic
 	if err := cn.OnMessage(9999, nil); err != nil {
 		t.Fatalf("unknown pkgType should be tolerated, got %v", err)
+	}
+}
+
+// fakeNetSession 记录 server 侧发出的响应，用于验证注册失败的反馈路径。
+type fakeNetSession struct {
+	mu     sync.Mutex
+	sent   []fakeSentMsg
+	closed bool
+	bind   interface{}
+}
+
+type fakeSentMsg struct {
+	msgId uint32
+	data  []byte
+}
+
+func (f *fakeNetSession) GetID() netSession.SessionID                   { return 1 }
+func (f *fakeNetSession) GetConn() netConnect.Conn                      { return nil }
+func (f *fakeNetSession) SetConn(netConnect.Conn)                       {}
+func (f *fakeNetSession) SetSendMessageFunc(netSession.SendMessageFunc) {}
+func (f *fakeNetSession) GetBindObject() interface{}                    { return f.bind }
+func (f *fakeNetSession) SetBindObject(o interface{})                   { f.bind = o }
+func (f *fakeNetSession) Close() error                                  { f.closed = true; return nil }
+
+func (f *fakeNetSession) SendMessage(msgId uint32, data []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, fakeSentMsg{msgId, append([]byte(nil), data...)})
+	return nil
+}
+
+// 鉴权失败的注册必须回带错误码的响应再断开，让 client 立即重试，
+// 而不是白等 registerResponseTimeout（10s）才察觉。
+func TestAuthRejectionSendsErrorResponse(t *testing.T) {
+	s := NewSystem(&ClusterConfig{
+		LocalSystemId: 1,
+		SystemConfigs: []*SystemConfig{
+			{SystemId: 1, Port: 19991, ActorTypes: nil},
+			{SystemId: 2, Host: "127.0.0.1", Port: 19992, ActorTypes: nil},
+		},
+		AuthToken: "right-token",
+	}, func(sc *vactor.SystemConfig) {
+		sc.LogFunc = func(vactor.LogLevel, string, ...interface{}) {}
+	}).(*system)
+
+	svr := NewServer(s.clusterNet)
+	fs := &fakeNetSession{}
+	data, err := proto.Marshal(&protocol.PkgRegisterSystemReq{SystemId: 2, AuthToken: "wrong-token"})
+	if err != nil {
+		t.Fatalf("marshal req: %v", err)
+	}
+
+	if err := svr.OnMessage(fs, uint32(protocol.PkgType_PkgTypeRegisterSystemReq), data); err == nil {
+		t.Fatal("auth mismatch must return an error so the session gets closed")
+	}
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.sent) != 1 {
+		t.Fatalf("expected exactly 1 response, got %d", len(fs.sent))
+	}
+	if fs.sent[0].msgId != uint32(protocol.PkgType_PkgTypeRegisterSystemRsp) {
+		t.Fatalf("unexpected msgId %d", fs.sent[0].msgId)
+	}
+	rsp := &protocol.PkgRegisterSystemRsp{}
+	if err := proto.Unmarshal(fs.sent[0].data, rsp); err != nil {
+		t.Fatalf("unmarshal rsp: %v", err)
+	}
+	if rsp.ErrorCode != protocol.ErrorCode_ErrorCodeAuthFailed {
+		t.Fatalf("expected ErrorCodeAuthFailed, got %v", rsp.ErrorCode)
+	}
+}
+
+// 未配置 AuthToken 时不做鉴权：注册请求正常进入绑定流程。
+func TestRegisterWithoutAuthTokenAllowed(t *testing.T) {
+	s := NewSystem(&ClusterConfig{
+		LocalSystemId: 1,
+		SystemConfigs: []*SystemConfig{
+			{SystemId: 1, Port: 19993, ActorTypes: nil},
+			{SystemId: 2, Host: "127.0.0.1", Port: 19994, ActorTypes: nil},
+		},
+	}, func(sc *vactor.SystemConfig) {
+		sc.LogFunc = func(vactor.LogLevel, string, ...interface{}) {}
+	}).(*system)
+
+	svr := NewServer(s.clusterNet)
+	fs := &fakeNetSession{}
+	data, err := proto.Marshal(&protocol.PkgRegisterSystemReq{SystemId: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svr.OnMessage(fs, uint32(protocol.PkgType_PkgTypeRegisterSystemReq), data); err != nil {
+		t.Fatalf("register without token should succeed, got %v", err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.sent) != 1 {
+		t.Fatalf("expected success response, got %d", len(fs.sent))
+	}
+	rsp := &protocol.PkgRegisterSystemRsp{}
+	if err := proto.Unmarshal(fs.sent[0].data, rsp); err != nil {
+		t.Fatal(err)
+	}
+	if rsp.ErrorCode != protocol.ErrorCode_ErrorCodeSuccess {
+		t.Fatalf("expected success, got %v", rsp.ErrorCode)
+	}
+}
+
+// 跨节点 BatchSend：只要有一条消息不可序列化就整批拒绝（不产生部分投递）。
+func TestClusterBatchSendAbortsOnUnserializableMessage(t *testing.T) {
+	s := newCodecSystem(t)
+	cn := s.clusterNet
+	remote := &vactor.ActorRefImpl{SystemId: 2, GroupSlot: 1, ActorType: ActorTypeStart + 30, ActorId: "b"}
+
+	err := cn.Send(2, &vactor.EnvelopeBatchSend{
+		ToActorRefs: []vactor.ActorRef{remote},
+		// 第二条是 string，不是已注册的 proto 消息
+		Messages: []interface{}{&protocol.Message{Type: 1}, "not-a-proto-message"},
+	})
+	if err == nil {
+		t.Fatal("batch containing an unserializable message must be rejected")
+	}
+	if err.Code() != vactor.ErrorCodeCustomStart+1 { // ErrorCodeMessageCannotSerialize
+		t.Fatalf("expected cannot-serialize code, got %v", err.Code())
+	}
+
+	// 全部可序列化时正常走到发送阶段（远端未连接 → 发送失败，但编码通过）
+	err = cn.Send(2, &vactor.EnvelopeBatchSend{
+		ToActorRefs: []vactor.ActorRef{remote},
+		Messages:    []interface{}{&protocol.Message{Type: 1}},
+	})
+	if err != nil && err.Code() == vactor.ErrorCodeCustomStart+1 {
+		t.Fatalf("valid batch should not be rejected at serialization: %v", err)
+	}
+}
+
+// 类型解析缓存必须在覆盖注册后失效，否则会把消息编到旧的 msgType 上。
+func TestRegisterMessageTypeInvalidatesCache(t *testing.T) {
+	s := newCodecSystem(t)
+	// 先走一次编解码，让缓存命中
+	if _, err := s.MarshalMessage(&protocol.Message{Type: 1}); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	pkg1, err := s.MarshalMessage(&protocol.Message{Type: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg1.Type != 1 {
+		t.Fatalf("first registration should map to type 1, got %d", pkg1.Type)
+	}
+	// 重新注册到另一个 msgType
+	s.RegisterMessageType(2, func() proto.Message { return &protocol.Message{} })
+	pkg2, err := s.MarshalMessage(&protocol.Message{Type: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg2.Type != 2 {
+		t.Fatalf("cache not invalidated after re-register: type=%d, want 2", pkg2.Type)
+	}
+	// 反序列化侧同样要跟着走新注册
+	if _, err := s.UnmarshalMessage(&protocol.Message{Type: 2, Data: nil}); err != nil {
+		t.Fatalf("unmarshal with re-registered type: %v", err)
+	}
+}
+
+// 序号类字段必须是 64 位：超过 uint32 的 RequestId/CallbackId 必须原样往返，
+// 否则长跑进程在序号回绕后会张冠李戴。
+func TestProtoIdFieldsAreWide(t *testing.T) {
+	const wide = uint64(1)<<40 + 9
+
+	req := &protocol.PkgEnvelopeRequest{RequestId: wide, Message: &protocol.Message{Type: 1}}
+	data, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotReq := &protocol.PkgEnvelopeRequest{}
+	if err := proto.Unmarshal(data, gotReq); err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.RequestId != wide {
+		t.Fatalf("RequestId truncated: got %d, want %d", gotReq.RequestId, wide)
+	}
+
+	rsp := &protocol.PkgEnvelopeResponse{RequestId: wide, Response: &protocol.Response{}}
+	data, err = proto.Marshal(rsp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotRsp := &protocol.PkgEnvelopeResponse{}
+	if err := proto.Unmarshal(data, gotRsp); err != nil {
+		t.Fatal(err)
+	}
+	if gotRsp.RequestId != wide {
+		t.Fatalf("RequestId truncated: got %d, want %d", gotRsp.RequestId, wide)
+	}
+
+	ara := &protocol.PkgEnvelopeResponseAsync{CallbackId: wide, CallbackAddress: wide, Response: &protocol.Response{}}
+	data, err = proto.Marshal(ara)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotAra := &protocol.PkgEnvelopeResponseAsync{}
+	if err := proto.Unmarshal(data, gotAra); err != nil {
+		t.Fatal(err)
+	}
+	if gotAra.CallbackId != wide || gotAra.CallbackAddress != wide {
+		t.Fatalf("async ids truncated: got %d/%d, want %d", gotAra.CallbackId, gotAra.CallbackAddress, wide)
+	}
+}
+
+// vactor.CallbackId 必须是 64 位（编译期约束的行为体现）。
+func TestCallbackIdIsWide(t *testing.T) {
+	var id vactor.CallbackId = 1<<40 + 3
+	if uint64(id) != 1<<40+3 {
+		t.Fatalf("CallbackId lost precision: %d", uint64(id))
 	}
 }
