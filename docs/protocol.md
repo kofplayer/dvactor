@@ -26,13 +26,18 @@
 | 2 EnvelopeBatchSend | PkgEnvelopeBatchSend | EnvelopeBatchSend |
 | 3 EnvelopeRequestAsync | PkgEnvelopeRequestAsync | EnvelopeRequestAsync（含 CallbackId/CallbackAddress，均为 uint64） |
 | 4 EnvelopeResponseAsync | PkgEnvelopeResponseAsync | EnvelopeResponseAsync |
-| 5 EnvelopeRequest | PkgEnvelopeRequest | EnvelopeRequest |
-| 6 EnvelopeResponse | PkgEnvelopeResponse | EnvelopeResponse |
+| 5 EnvelopeRequest | PkgEnvelopeRequest | EnvelopeRequest（含 `CallbackAddress`） |
+| 6 EnvelopeResponse | PkgEnvelopeResponse | EnvelopeResponse（原样回带 `CallbackAddress`） |
 | 7 EnvelopeWatch | PkgEnvelopeWatch | EnvelopeWatch |
 | 8 EnvelopeNotify | PkgEnvelopeNotify | EnvelopeNotify（拆出 ActorRef/WatchType/Message 三个字段） |
 | 9 EnvelopeFireNotify | PkgEnvelopeFireNotify | EnvelopeFireNotify |
 | 10 RegisterSystemReq | PkgRegisterSystemReq | 集群注册（含 AuthToken，[握手流程](cluster.md)） |
 | 11 RegisterSystemRsp | PkgRegisterSystemRsp | 集群注册 |
+
+**`CallbackAddress` 的语义**：它是请求方 `actorContext` 的实例 id（`instanceId`，由进程内原子计数生成），被请求方**原样回带**，仅供**发起节点**剔除"上一代（已回收重建）context"的陈旧响应——防止请求号跨代碰撞导致新请求误取旧响应的载荷。要点：
+
+- **进程内唯一，非全局唯一**：只在发起节点本地比对，因此响应必须原路返回该节点（当前按 `ToActorRef.SystemId` 路由，成立）。若将来引入多跳/中继，需要退化为 (SystemId, instanceId) 或保持该字段对中继不透明。
+- **`0` 表示未携带**（旧版本对端/手工构造）：接收侧退化为只比对 `RequestId`，保证滚动升级期间新旧节点互通。
 
 > 序号类字段（`RequestId` / `CallbackId` / `CallbackAddress`）在线协议中均为 **uint64**：
 > 单调递增的序号若用 32 位，会在约 40 亿次请求后回绕，长跑进程可能因此把新回调与残留条目混淆。

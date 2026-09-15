@@ -49,6 +49,8 @@
 
 **CI 与依赖版本**：CI 使用的 vactor revision 固定在 [`.vactor-revision`](.vactor-revision)（原先从默认分支拉取，vactor 一提交 CI 结果就可能变）。改完 vactor 并本地跑通后，用 `git -C ../vactor rev-parse HEAD` 更新该文件。手动触发 `workflow_dispatch` 时可用 `vactor_ref` 输入临时覆盖，便于验证配合某个 vactor 分支/PR 是否可行。
 
+> **推送顺序有依赖**：CI 按该 revision 从 GitHub 检出 vactor 源码。若 dvactor 用到了 vactor 的新接口，**必须先提交并推送 vactor → 更新本文件 → 再提交推送 dvactor**。顺序颠倒会让 CI 检出到缺少该接口的旧 vactor 而编译失败；只把本文件更新成"本地 HEAD"也不够——本地 HEAD 未推送时 GitHub 上同样取不到。
+
 ## 深入阅读（L2）
 
 - [docs/cluster.md](docs/cluster.md) — 组网、注册握手与鉴权、重连、消息收发路径、错误码

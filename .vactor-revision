@@ -11,4 +11,4 @@
 #
 # 手动触发（workflow_dispatch）时可用 vactor_ref 输入临时覆盖，
 # 便于验证「dvactor 能否配合 vactor 的某个分支/PR」。
-3dbf5bd42a819ce8427f0893401971290b65aad1
+0b6c062840533a423d8cf1e6488fb60318d874c0
