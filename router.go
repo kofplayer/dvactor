@@ -116,6 +116,11 @@ func (r *Router) Router(envelope vactor.Envelope) vactor.VAError {
 			}
 		}
 	case *vactor.EnvelopeNotify:
+		// 与 clusterNet.Send 的对称防护：e.Message 为 nil 时下面的字段提取会 panic
+		if e.Message == nil {
+			r.system.LogError("router: envelope notify without payload, dropped")
+			return vactor.NewVAError(ErrorCodeMessageLenError)
+		}
 		groups := make(map[vactor.SystemId][]vactor.ActorRef)
 		for _, actorRef := range e.ToActorRefs {
 			systemId := actorRef.GetSystemId()

@@ -65,8 +65,9 @@ func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data 
 		if !ok {
 			return fmt.Errorf("can not find systemId %v", req.SystemId)
 		}
-		if info.passive {
-			return fmt.Errorf("systemId %v is passive", req.SystemId)
+		if info.weDial {
+			// 该节点本应由本节点主动去连：若它反过来连进来，说明两侧配置的方向不一致
+			return fmt.Errorf("systemId %v should be dialed by us, not register to us", req.SystemId)
 		}
 		info.lock.Lock()
 		defer info.lock.Unlock()

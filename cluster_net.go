@@ -23,8 +23,8 @@ func NewClusterNet(localSystem *system, clusterConfig *ClusterConfig) *clusterNe
 			localSystemIndex = i
 		}
 		systemInfos[config.SystemId] = &systemInfo{
-			config:  config,
-			passive: !findSelf,
+			config: config,
+			weDial: !findSelf,
 		}
 	}
 	return &clusterNet{
@@ -94,8 +94,14 @@ type clusterNet struct {
 }
 
 type systemInfo struct {
-	config  *SystemConfig
-	passive bool
+	config *SystemConfig
+	// weDial 表示"本节点是该连接的发起方"：true 时由本节点的 client 主动连对方
+	// （收发走 info.cli），false 时由对方连入本节点的 server（收发走 info.session）。
+	// 取值是 !findSelf——即 SystemConfigs 列表中**排在自身之前**的节点为 true。
+	//
+	// 该字段原名 passive，语义恰好相反（"passive" 的那一方实际上是我们主动去连的），
+	// 是这段代码最大的理解成本来源，故改名。
+	weDial  bool
 	lock    sync.RWMutex
 	session netSession.NetSession
 	cli     netClient.NetClient
@@ -166,7 +172,7 @@ func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte
 	info.lock.RLock()
 	defer info.lock.RUnlock()
 	var err error
-	if info.passive {
+	if info.weDial {
 		if info.cli != nil {
 			err = info.cli.SendMessage(msgId, data)
 		}
@@ -179,7 +185,7 @@ func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte
 		cn.localSystem.LogError("system %v send message error: %v", systemId, err)
 		return vactor.NewVAError(ErrorCodeMessageSendFail)
 	}
-	if (info.passive && info.cli == nil) || (!info.passive && info.session == nil) {
+	if (info.weDial && info.cli == nil) || (!info.weDial && info.session == nil) {
 		cn.localSystem.LogError("system %v disconnect", systemId)
 		return vactor.NewVAError(ErrorCodeMessageSendFail)
 	}
@@ -304,7 +310,16 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			IsWatch:      e.IsWatch,
 		}
 	case *vactor.EnvelopeNotify:
-		msg, err := cn.localSystem.MarshalMessage(e.Message.Message)
+		// e.Message 为 nil 时不能解引用：正常内部路径总会构造它，但信封是导出类型，
+		// 手工构造并交给 LocalRouter 的调用方会走到这里。
+		if e.Message == nil {
+			cn.localSystem.LogError("envelope notify without payload, dropped")
+			return vactor.NewVAError(ErrorCodeMessageLenError)
+		}
+		// 与 Request/Response 一致走 marshalMessage：nil 消息编码为"未携带"，
+		// 接收侧还原为 nil。直接用 MarshalMessage 会让本地能发的 nil/非 proto
+		// 通知在跨节点时整批失败，语义不一致。
+		msg, err := cn.marshalMessage(e.Message.Message)
 		if err != nil {
 			return err
 		}

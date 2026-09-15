@@ -51,14 +51,20 @@ func (wp *WatchProxy) OnMessage(ctx vactor.EnvelopeContext) {
 		wp.updateOuterWatch(ctx, e.WatchType, e.IsWatch, e.Queue)
 	case *vactor.MsgOnWatchMsg:
 		if queues, ok := wp.queuess[e.WatchType]; ok {
+			// 先收集再摘除：与 vactor 的 notify 保持同一写法，不依赖
+			// "range 期间删除当前键是安全的"这一实现细节
+			var stale []*vactor.Queue[interface{}]
 			for queue := range queues {
-				if (!queue.Enqueue(&vactor.MsgOnWatchMsg{
+				if !queue.Enqueue(&vactor.MsgOnWatchMsg{
 					ActorRef:  wp.watcheeActorRef,
 					WatchType: e.WatchType,
 					Message:   e.Message,
-				})) {
-					wp.updateOuterWatch(ctx, e.WatchType, false, queue)
+				}) {
+					stale = append(stale, queue)
 				}
+			}
+			for _, queue := range stale {
+				wp.updateOuterWatch(ctx, e.WatchType, false, queue)
 			}
 		}
 		if watchers, ok := wp.watcherss[e.WatchType]; ok {
@@ -75,10 +81,14 @@ func (wp *WatchProxy) OnMessage(ctx vactor.EnvelopeContext) {
 	case *vactor.MsgOnEventMsg:
 		watchType := vactor.WatchType(e.EventId)
 		if queues, ok := wp.queuess[watchType]; ok {
+			var stale []*vactor.Queue[interface{}]
 			for queue := range queues {
 				if !queue.Enqueue(e) {
-					wp.updateOuterWatch(ctx, watchType, false, queue)
+					stale = append(stale, queue)
 				}
+			}
+			for _, queue := range stale {
+				wp.updateOuterWatch(ctx, watchType, false, queue)
 			}
 		}
 		if watchers, ok := wp.watcherss[watchType]; ok {

@@ -46,10 +46,16 @@ func (rp *RequestProxy) OnMessage(ctx vactor.EnvelopeContext) {
 			proxyTimeout = m.Timeout + requestProxyTimeoutSlack
 		}
 		ctx.RequestAsync(m.ToActorRef, m.Message, proxyTimeout, func(msg interface{}, err vactor.VAError) {
-			// RspChan 容量为 1，调用方超时离开后写入也不会阻塞
-			m.RspChan <- &vactor.Response{
+			// 非阻塞写：RspChan 容量为 1，正常路径（一次请求一次回调）不会满；
+			// 但阻塞写会把"契约被破坏"变成"永久卡死代理 actor goroutine"，
+			// 而非阻塞写只丢一条响应并留下一条可排查的日志。
+			select {
+			case m.RspChan <- &vactor.Response{
 				Error:   err,
 				Message: msg,
+			}:
+			default:
+				ctx.LogWarn("request proxy response dropped: caller channel is full for %v", m.ToActorRef)
 			}
 		})
 	}
