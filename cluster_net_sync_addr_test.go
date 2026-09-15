@@ -21,7 +21,7 @@ func TestClusterNetSendCarriesSyncCallbackAddress(t *testing.T) {
 	fs := &fakeNetSession{}
 	info := cn.systemInfos[2]
 	info.lock.Lock()
-	info.passive = false
+	info.weDial = false
 	info.session = fs
 	info.lock.Unlock()
 
@@ -104,7 +104,7 @@ func TestClusterNetSyncCallbackAddressEchoedBack(t *testing.T) {
 	fs := &fakeNetSession{}
 	info := s.clusterNet.systemInfos[2]
 	info.lock.Lock()
-	info.passive = false
+	info.weDial = false
 	info.session = fs
 	info.lock.Unlock()
 

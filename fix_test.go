@@ -582,3 +582,56 @@ func TestCallbackIdIsWide(t *testing.T) {
 		t.Fatalf("CallbackId lost precision: %d", uint64(id))
 	}
 }
+
+// 回归：跨节点 Notify 的 nil 消息必须与 Request/Response 同样被允许（编码为"未携带"），
+// 而不是整批失败；EnvelopeNotify 载荷本身为 nil 时两层都不得 panic。
+func TestClusterNetNotifyNilMessageAcrossNodes(t *testing.T) {
+	const notifyType vactor.ActorType = ActorTypeStart + 30
+	s := newCodecSystem(t)
+	cn := s.clusterNet
+	fs := &fakeNetSession{}
+	info := cn.systemInfos[2]
+	info.lock.Lock()
+	info.weDial = false
+	info.session = fs
+	info.lock.Unlock()
+
+	ref := func(sid uint32, id string) vactor.ActorRef {
+		return &vactor.ActorRefImpl{SystemId: vactor.SystemId(sid), GroupSlot: 1, ActorType: notifyType, ActorId: vactor.ActorId(id)}
+	}
+	targets := []vactor.ActorRef{ref(2, "a")}
+
+	// 载荷消息为 nil：此前直接用 MarshalMessage 会返回 ErrorCodeMessageCannotSerialize，
+	// 于是"本地能发、跨节点必失败"。现在走 marshalMessage，与 Request/Response 一致。
+	if err := cn.Send(2, &vactor.EnvelopeNotify{
+		ToActorRefs: targets,
+		NotifyType:  vactor.NotifyTypeWatch,
+		Message:     &vactor.MsgOnWatchMsg{ActorRef: ref(1, "w"), WatchType: 7, Message: nil},
+	}); err != nil {
+		t.Fatalf("notify with nil message should be allowed across nodes, got %v", err)
+	}
+	fs.mu.Lock()
+	sent := len(fs.sent)
+	fs.mu.Unlock()
+	if sent != 1 {
+		t.Fatalf("expected 1 frame, got %d", sent)
+	}
+
+	// EnvelopeNotify.Message 本身为 nil：不得 panic，返回错误
+	if err := cn.Send(2, &vactor.EnvelopeNotify{
+		ToActorRefs: targets,
+		NotifyType:  vactor.NotifyTypeWatch,
+		Message:     nil,
+	}); err == nil {
+		t.Fatal("notify without payload must be rejected instead of panicking")
+	}
+
+	// Router 侧的对称防护
+	if err := s.router.Router(&vactor.EnvelopeNotify{
+		ToActorRefs: targets,
+		NotifyType:  vactor.NotifyTypeWatch,
+		Message:     nil,
+	}); err == nil {
+		t.Fatal("router must reject notify without payload instead of panicking")
+	}
+}
