@@ -268,10 +268,11 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 		}
 		msgId = uint32(protocol.PkgType_PkgTypeEnvelopeRequest)
 		pkg = &protocol.PkgEnvelopeRequest{
-			FromActorRef: ActorRefToProto(e.FromActorRef),
-			ToActorRef:   ActorRefToProto(e.ToActorRef),
-			Message:      msg,
-			RequestId:    uint64(e.RequestId),
+			FromActorRef:    ActorRefToProto(e.FromActorRef),
+			ToActorRef:      ActorRefToProto(e.ToActorRef),
+			Message:         msg,
+			RequestId:       uint64(e.RequestId),
+			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeResponse:
 		msg, err := cn.marshalMessage(e.Message)
@@ -288,10 +289,11 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 			rsp.ErrorCode = protocol.ErrorCode(e.Error.Code())
 		}
 		pkg = &protocol.PkgEnvelopeResponse{
-			FromActorRef: ActorRefToProto(e.FromActorRef),
-			ToActorRef:   ActorRefToProto(e.ToActorRef),
-			Response:     rsp,
-			RequestId:    uint64(e.RequestId),
+			FromActorRef:    ActorRefToProto(e.FromActorRef),
+			ToActorRef:      ActorRefToProto(e.ToActorRef),
+			Response:        rsp,
+			RequestId:       uint64(e.RequestId),
+			CallbackAddress: e.CallbackAddress,
 		}
 	case *vactor.EnvelopeWatch:
 		msgId = uint32(protocol.PkgType_PkgTypeEnvelopeWatch)
@@ -440,10 +442,11 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			return err
 		}
 		e := &vactor.EnvelopeRequest{
-			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
-			Message:      msg,
-			RequestId:    vactor.CallbackId(pkg.RequestId),
+			FromActorRef:    ActorRefFromProto(pkg.FromActorRef),
+			ToActorRef:      ActorRefFromProto(pkg.ToActorRef),
+			Message:         msg,
+			RequestId:       vactor.CallbackId(pkg.RequestId),
+			CallbackAddress: pkg.CallbackAddress,
 		}
 		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeResponse:
@@ -469,6 +472,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 				Error:   errorCodeToVAError(rspCode),
 				Message: msg,
 			},
+			CallbackAddress: pkg.CallbackAddress,
 		}
 		_ = cn.localSystem.LocalRouter(e)
 	case protocol.PkgType_PkgTypeEnvelopeWatch:

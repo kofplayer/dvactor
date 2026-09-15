@@ -80,6 +80,11 @@ message PkgEnvelopeRequest {
 	ActorRef ToActorRef = 2;
 	Message Message = 3;
 	uint64 RequestId = 4;
+	// CallbackAddress 是请求方 actorContext 实例 id（进程内唯一，非全局唯一）。
+	// 被请求方原样回带进 PkgEnvelopeResponse，供发起节点剔除"上一代（已重建）
+	// context"的陈旧同步响应，避免 requestId 跨代碰撞导致的错答。
+	// 0 表示未携带（旧版本对端），接收侧退化为只比对 RequestId。
+	uint64 CallbackAddress = 5;
 }
 
 message PkgEnvelopeResponse {
@@ -87,6 +92,8 @@ message PkgEnvelopeResponse {
 	ActorRef ToActorRef = 2;
 	Response Response = 3;
 	uint64 RequestId = 4;
+	// 原样回带 PkgEnvelopeRequest.CallbackAddress；0 表示未携带（向后兼容）。
+	uint64 CallbackAddress = 5;
 }
 
 message PkgEnvelopeWatch {

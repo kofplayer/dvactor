@@ -603,13 +603,18 @@ func (x *PkgEnvelopeResponseAsync) GetCallbackAddress() uint64 {
 }
 
 type PkgEnvelopeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FromActorRef  *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
-	ToActorRef    *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
-	Message       *Message               `protobuf:"bytes,3,opt,name=Message,proto3" json:"Message,omitempty"`
-	RequestId     uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	FromActorRef *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
+	ToActorRef   *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
+	Message      *Message               `protobuf:"bytes,3,opt,name=Message,proto3" json:"Message,omitempty"`
+	RequestId    uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
+	// CallbackAddress 是请求方 actorContext 实例 id（进程内唯一，非全局唯一）。
+	// 被请求方原样回带进 PkgEnvelopeResponse，供发起节点剔除"上一代（已重建）
+	// context"的陈旧同步响应，避免 requestId 跨代碰撞导致的错答。
+	// 0 表示未携带（旧版本对端），接收侧退化为只比对 RequestId。
+	CallbackAddress uint64 `protobuf:"varint,5,opt,name=CallbackAddress,proto3" json:"CallbackAddress,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PkgEnvelopeRequest) Reset() {
@@ -670,14 +675,23 @@ func (x *PkgEnvelopeRequest) GetRequestId() uint64 {
 	return 0
 }
 
+func (x *PkgEnvelopeRequest) GetCallbackAddress() uint64 {
+	if x != nil {
+		return x.CallbackAddress
+	}
+	return 0
+}
+
 type PkgEnvelopeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FromActorRef  *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
-	ToActorRef    *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
-	Response      *Response              `protobuf:"bytes,3,opt,name=Response,proto3" json:"Response,omitempty"`
-	RequestId     uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	FromActorRef *ActorRef              `protobuf:"bytes,1,opt,name=FromActorRef,proto3" json:"FromActorRef,omitempty"`
+	ToActorRef   *ActorRef              `protobuf:"bytes,2,opt,name=ToActorRef,proto3" json:"ToActorRef,omitempty"`
+	Response     *Response              `protobuf:"bytes,3,opt,name=Response,proto3" json:"Response,omitempty"`
+	RequestId    uint64                 `protobuf:"varint,4,opt,name=RequestId,proto3" json:"RequestId,omitempty"`
+	// 原样回带 PkgEnvelopeRequest.CallbackAddress；0 表示未携带（向后兼容）。
+	CallbackAddress uint64 `protobuf:"varint,5,opt,name=CallbackAddress,proto3" json:"CallbackAddress,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PkgEnvelopeResponse) Reset() {
@@ -734,6 +748,13 @@ func (x *PkgEnvelopeResponse) GetResponse() *Response {
 func (x *PkgEnvelopeResponse) GetRequestId() uint64 {
 	if x != nil {
 		return x.RequestId
+	}
+	return 0
+}
+
+func (x *PkgEnvelopeResponse) GetCallbackAddress() uint64 {
+	if x != nil {
+		return x.CallbackAddress
 	}
 	return 0
 }
@@ -1109,21 +1130,23 @@ const file_protocol_cluster_proto_rawDesc = "" +
 	"\n" +
 	"CallbackId\x18\x04 \x01(\x04R\n" +
 	"CallbackId\x12(\n" +
-	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"\xcb\x01\n" +
+	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"\xf5\x01\n" +
 	"\x12PkgEnvelopeRequest\x126\n" +
 	"\fFromActorRef\x18\x01 \x01(\v2\x12.protocol.ActorRefR\fFromActorRef\x122\n" +
 	"\n" +
 	"ToActorRef\x18\x02 \x01(\v2\x12.protocol.ActorRefR\n" +
 	"ToActorRef\x12+\n" +
 	"\aMessage\x18\x03 \x01(\v2\x11.protocol.MessageR\aMessage\x12\x1c\n" +
-	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\"\xcf\x01\n" +
+	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\x12(\n" +
+	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"\xf9\x01\n" +
 	"\x13PkgEnvelopeResponse\x126\n" +
 	"\fFromActorRef\x18\x01 \x01(\v2\x12.protocol.ActorRefR\fFromActorRef\x122\n" +
 	"\n" +
 	"ToActorRef\x18\x02 \x01(\v2\x12.protocol.ActorRefR\n" +
 	"ToActorRef\x12.\n" +
 	"\bResponse\x18\x03 \x01(\v2\x12.protocol.ResponseR\bResponse\x12\x1c\n" +
-	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\"\xb6\x01\n" +
+	"\tRequestId\x18\x04 \x01(\x04R\tRequestId\x12(\n" +
+	"\x0fCallbackAddress\x18\x05 \x01(\x04R\x0fCallbackAddress\"\xb6\x01\n" +
 	"\x10PkgEnvelopeWatch\x126\n" +
 	"\fFromActorRef\x18\x01 \x01(\v2\x12.protocol.ActorRefR\fFromActorRef\x122\n" +
 	"\n" +
