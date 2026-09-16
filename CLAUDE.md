@@ -27,6 +27,7 @@
 | 文件 | 内容 |
 |------|------|
 | [system.go](system.go) | `ClusterSystem` 接口、`ClusterConfig`/`SystemConfig`、配置校验、消息类型注册与 proto 编解码、集群停机 |
+| [topology.go](topology.go) | 组网角色判定（纯函数）：本节点是否监听、需要主动连接哪些节点 |
 | [router.go](router.go) | 集群 `Router`：寻址哈希、本地/远程分流、Watch/OuterWatch/OuterRequest 的代理转发 |
 | [cluster_net.go](cluster_net.go) | 集群网络层：envelope ↔ proto 包的双向转换、`Send`/`OnMessage`、组网与连接管理 |
 | [cluster_client.go](cluster_client.go) | 主动连接侧：连接、注册握手（带 token 与响应超时）、断线重连循环 |

@@ -14,25 +14,29 @@ import (
 )
 
 func NewClusterNet(localSystem *system, clusterConfig *ClusterConfig) *clusterNet {
-	systemInfos := make(map[vactor.SystemId]*systemInfo)
-	findSelf := false
 	localSystemIndex := -1
 	for i, config := range clusterConfig.SystemConfigs {
-		if !findSelf && clusterConfig.LocalSystemId == config.SystemId {
-			findSelf = true
+		if clusterConfig.LocalSystemId == config.SystemId {
 			localSystemIndex = i
+			break
 		}
+	}
+	// validateClusterConfig 已保证本地节点一定在列表中
+	topology := computeTopology(localSystemIndex, len(clusterConfig.SystemConfigs))
+
+	systemInfos := make(map[vactor.SystemId]*systemInfo, len(clusterConfig.SystemConfigs))
+	for i, config := range clusterConfig.SystemConfigs {
 		systemInfos[config.SystemId] = &systemInfo{
 			config: config,
-			weDial: !findSelf,
+			weDial: topology.weDial(i),
 		}
 	}
 	return &clusterNet{
-		localSystem:      localSystem,
-		localSystemIndex: localSystemIndex,
-		clusterConfig:    clusterConfig,
-		systemInfos:      systemInfos,
-		systemCount:      len(systemInfos),
+		localSystem:   localSystem,
+		topology:      topology,
+		clusterConfig: clusterConfig,
+		systemInfos:   systemInfos,
+		systemCount:   len(systemInfos),
 	}
 }
 
@@ -83,8 +87,10 @@ func (cn *clusterNet) unmarshalMessage(pm *protocol.Message) (interface{}, error
 }
 
 type clusterNet struct {
-	localSystem          *system
-	localSystemIndex     int
+	localSystem *system
+	// topology 本节点在全互联拓扑中的角色（listen / 需要主动连接的节点下标）。
+	// 判定逻辑见 topology.go，与 localSystemIndex 的推导分离，便于单独验证。
+	topology             clusterTopology
 	clusterConfig        *ClusterConfig
 	systemInfos          map[vactor.SystemId]*systemInfo
 	systemCount          int
@@ -97,7 +103,7 @@ type systemInfo struct {
 	config *SystemConfig
 	// weDial 表示"本节点是该连接的发起方"：true 时由本节点的 client 主动连对方
 	// （收发走 info.cli），false 时由对方连入本节点的 server（收发走 info.session）。
-	// 取值是 !findSelf——即 SystemConfigs 列表中**排在自身之前**的节点为 true。
+	// 即 SystemConfigs 列表中**排在自身之前**的节点为 true（见 topology.weDial）。
 	//
 	// 该字段原名 passive，语义恰好相反（"passive" 的那一方实际上是我们主动去连的），
 	// 是这段代码最大的理解成本来源，故改名。
@@ -110,7 +116,7 @@ type systemInfo struct {
 func (cn *clusterNet) start() error {
 	cn.localSystem.LogDebug("start cluster")
 	atomic.AddInt32(&cn.connectedSystemCount, 1)
-	if cn.localSystemIndex < cn.systemCount-1 {
+	if cn.topology.listen {
 		cn.localSystem.LogInfo("start server")
 		cn.server = NewServer(cn)
 		if err := cn.server.Start(); err != nil {
@@ -118,12 +124,10 @@ func (cn *clusterNet) start() error {
 		}
 	}
 
-	if cn.localSystemIndex != 0 {
-		cn.clients = make(map[vactor.SystemId]*clusterClient)
-		for index, config := range cn.clusterConfig.SystemConfigs {
-			if index >= cn.localSystemIndex {
-				break
-			}
+	if len(cn.topology.dialIndexes) > 0 {
+		cn.clients = make(map[vactor.SystemId]*clusterClient, len(cn.topology.dialIndexes))
+		for _, index := range cn.topology.dialIndexes {
+			config := cn.clusterConfig.SystemConfigs[index]
 			client := NewClusterClient(cn, config.SystemId)
 			cn.clients[config.SystemId] = client
 			cn.localSystem.LogInfo("start client to %v", config.SystemId)

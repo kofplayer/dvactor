@@ -39,6 +39,8 @@ func NewSystem(clusterConfig *ClusterConfig, cfgFuncs ...vactor.SystemConfigFunc
 	s.router = NewRouter(_system, clusterConfig, s.clusterNet)
 	s.SetRouter(s.router.Router)
 	s.SetCreateActorRefExFunc(s.router.CreateActorRefEx)
+	// 代理类型（11/12）是保留类型，低于 ActorTypeStart，因此走 vactor 的注册实现
+	// 绕开 dvactor 自己的下限校验——详见 RegisterActorType 的说明。
 	s.System.RegisterActorType(WatchProxyActorType, func() vactor.Actor {
 		return s.wrapWatchProxy(NewWatchProxy())
 	})
@@ -192,6 +194,15 @@ func (s *system) wrapWatchProxy(wp *WatchProxy) vactor.Actor {
 	}
 }
 
+// RegisterActorType 注册业务 actor 类型。
+//
+// 与 vactor 的同名方法**语义不同**：vactor 遇到非法类型只记 Error 日志并忽略，
+// dvactor 则直接 panic。原因是 dvactor 的 1~19 已被框架占用（1 = 事件总线、
+// 11/12 = RequestProxy/WatchProxy），业务类型落到这个区间会与代理撞号，
+// 表现为难以定位的消息串流——所以在注册期就 fail fast，而不是留到运行期。
+//
+// 注意 NewSystem 内部注册 11/12 时走的是内嵌的 s.System.RegisterActorType
+// （vactor 的实现），刻意绕开本方法的下限校验：它们正是那些保留类型本身。
 func (s *system) RegisterActorType(actorType vactor.ActorType, actorCreator func() vactor.Actor) {
 	if actorType < ActorTypeStart {
 		panic(fmt.Sprintf("actor type %v is less than %v", actorType, ActorTypeStart))

@@ -10,7 +10,7 @@
 - 排在自己**之前**的节点（`weDial=true`）：本节点作为 client 主动连接对方的 `Host:Port`；
 - 列表第一个节点纯 server，最后一个纯 client，中间节点两者兼备 → 全互联。
 
-判断逻辑在 `NewClusterNet`（`weDial: !findSelf`，即列表中位于自己之前的节点标记为"由本节点主动连接"）。
+判断逻辑在 [topology.go](../topology.go) 的 `computeTopology(localIndex, nodeCount)`——**纯函数**，只依赖两个下标即可算出"是否监听 + 需要主动连接哪些节点"，因此多节点形状（首/中/末、单节点、全互联不变量）可以直接单测，不必起网络。`NewClusterNet` 只负责解析出 `localIndex` 再调用它。
 
 > 该字段原名 `passive`，语义与字面相反——被标为 "passive" 的那一方恰恰是本节点主动去连的。现改名 `weDial`（"我们拨号"），`true` = 收发走 `info.cli`，`false` = 收发走 `info.session`。
 

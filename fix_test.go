@@ -635,3 +635,40 @@ func TestClusterNetNotifyNilMessageAcrossNodes(t *testing.T) {
 		t.Fatal("router must reject notify without payload instead of panicking")
 	}
 }
+
+// 语义固化：dvactor 对低于 ActorTypeStart 的业务类型直接 panic（vactor 只记日志），
+// 因为 1~19 被框架保留（1 事件总线 / 11 RequestProxy / 12 WatchProxy），
+// 业务类型落进该区间会与代理撞号且难以定位。两条断言一起固定"谁该 panic、谁不该"。
+func TestRegisterActorTypeReservedRangePolicy(t *testing.T) {
+	t.Run("reserved type panics", func(t *testing.T) {
+		s := newCodecSystem(t)
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("registering a reserved actor type must panic")
+			}
+		}()
+		s.RegisterActorType(WatchProxyActorType, func() vactor.Actor { return nil })
+	})
+
+	t.Run("business type is accepted", func(t *testing.T) {
+		s := newCodecSystem(t)
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("registering a business type must not panic: %v", r)
+			}
+		}()
+		s.RegisterActorType(ActorTypeStart, func() vactor.Actor { return func(vactor.EnvelopeContext) {} })
+	})
+
+	t.Run("proxy types stay below the business floor", func(t *testing.T) {
+		// NewSystem 内部注册 11/12 绕开下限校验——所以它们必须真的低于下限，
+		// 否则构造阶段自己就会 panic
+		if WatchProxyActorType >= ActorTypeStart || RequestProxyActorType >= ActorTypeStart {
+			t.Fatalf("proxy types must stay reserved: watch=%v request=%v floor=%v",
+				WatchProxyActorType, RequestProxyActorType, ActorTypeStart)
+		}
+		if ActorTypeStart != vactor.ActorTypeStart+10 {
+			t.Fatalf("ActorTypeStart = %v, want vactor.ActorTypeStart+10", ActorTypeStart)
+		}
+	})
+}
