@@ -39,6 +39,10 @@ type OuterRequest struct {
 
 func (rp *RequestProxy) OnMessage(ctx vactor.EnvelopeContext) {
 	switch m := ctx.GetMessage().(type) {
+	case *vactor.MsgOnStart:
+		// 本代理不处理 MsgOnTick，关掉周期 tick。它依赖的异步超时扫描不受影响：
+		// 转发期间 pendingAsyncCallback > 0，框架照常投递 tick（见 vactor 的 needTick）。
+		ctx.SetTickEnabled(false)
 	case *OuterRequest:
 		// 代理兜底超时 = 调用方时限 + 余量；调用方未设时限时退回默认兜底值
 		proxyTimeout := RequestProxyTimeout

@@ -44,6 +44,10 @@ type WatchProxy struct {
 func (wp *WatchProxy) OnMessage(ctx vactor.EnvelopeContext) {
 	switch e := ctx.GetMessage().(type) {
 	case *vactor.MsgOnStart:
+		// 本代理不处理 MsgOnTick，关掉周期 tick 以免每秒被无谓唤醒。
+		// 框架确需的投递不受影响：有待处理异步回调、或闲置回收条件满足时仍会收到 tick
+		// （见 vactor 的 needTick），而 WatchProxy 恰好依赖后者在被闲置时回收自己。
+		ctx.SetTickEnabled(false)
 		wp.watcheeActorRef = GetWatcheeActorRef(ctx, ctx.GetActorRef().GetActorId())
 	case *InnerWatch:
 		wp.updateInnerWatch(ctx, e.WatchType, e.IsWatch, ctx.GetFromActorRef())
