@@ -34,4 +34,6 @@ func main() {
 	}
 
 	time.Sleep(time.Second)
+	// 示例也要干净停机：Stop 会先关集群网络（监听/会话/重连循环）再停 actor 层
+	system.Stop()
 }

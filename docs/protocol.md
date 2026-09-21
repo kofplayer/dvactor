@@ -13,7 +13,7 @@
 
 - `len` 只表示 data 长度，总包长 = len + 5。
 - 收发两侧在 [engine/net/client/client.go](../engine/net/client/client.go) 与 [engine/net/server/server.go](../engine/net/server/server.go) 中分别做拼包/拆包；接收方循环切片处理粘包。
-- **注意**：msgId 只有 1 字节，`PackMessage` 对超过 255 的 msgId 显式报错（当前最大 11，余量充足，但扩协议时需注意）。帧长字段有 `MaxPacketSize`（64MB）上限，超限帧由拆包层报错并断开连接，防止长度字段被伪造导致内存耗尽或溢出 panic。
+- **注意**：msgId 只有 1 字节，`PackMessage` 对超过 255 的 msgId 显式报错（当前最大 11，余量充足，但扩协议时需注意）。帧长字段有 `MaxPacketSize`（64MB）上限，**发送侧 `PackMessage` 与接收侧拆包层都会校验**：超限帧在本地即报错（`ErrPacketTooLarge`），不再出现"本地打包成功、对端判定字节流不可信而拆掉整条链路"。长度字段只有 4 字节，缺少发送侧校验时 >4GB 的载荷还会被静默截断成畸形帧头。
 - **心跳**：引擎层保留 msgId `0xFE`(Ping)/`0xFD`(Pong)，不进入业务 PkgType。双端按 `HeartbeatInterval`（默认 20s）互发 Ping，接收方读超时 `HeartbeatTimeout`（默认 60s）用于检测半开连接。
 
 ## PkgType 与信封对照

@@ -18,8 +18,11 @@
 - `SystemConfig.ActorTypes` 决定该类型 actor 的候选放置节点；`EventHubActorType` 若要多节点事件互通，必须在各节点 ActorTypes 中声明。
 - 多节点必须**并发**启动：`Start()` 会阻塞等待全互联，单进程内顺序 `Start()` 会互相卡死。
 - 节点断线后 client 侧自动退避重连；重连成功后 WatchProxy 自动刷新 watch（分区期间丢失的订阅自愈，机制见 [docs/proxies.md](docs/proxies.md)）。
-- `Stop()` 先关集群网络（终止重连、关闭监听与会话）再停 actor 层，幂等、有限时间内返回。
+- `Stop()` / `StopWithContext(ctx)` 先关集群网络（终止重连、**等其退出并断开活动连接**、关闭监听与会话）再停 actor 层，幂等、有限时间内返回。`StopWithContext` 必须成对覆盖：它由内嵌的 `vactor.System` 提供，不覆盖就会只停 actor 层、把集群网络留在运行状态。
 - 跨节点信封的 `Message` 允许为 nil（"只回错误"的响应可正常跨节点）。
+- **单包错误不拆链**：`clusterNet.OnMessage` 对"解不开的信封 / 未注册的消息类型 / 目标引用非法"只丢这一条并记日志，只有帧长不可信才向上返回错误让 engine 断链。反过来做会让"漏在一个节点注册某类型"演变成整条链路反复重连（策略与理由见 [docs/cluster.md](docs/cluster.md)）。
+- **入向 To 引用必须过 `clusterNet.localTarget`**（校验 SystemId == 本节点、字段不越 uint16、GroupSlot 非 0）。绕过它会让 vactor group 的批级 recover 把本组当前一整批无关消息一起丢掉。
+- `ConnectTimeout` 默认值：0 = `DefaultConnectTimeout`(30s)，负值才是无限等待。配错 Host 时无限等待会让 `Start()` 永久阻塞。
 - **SystemId 越界（集群版）**：向**未在 `ClusterConfig.SystemConfigs` 中声明**的 SystemId 发消息，`clusterNet.doSend` 返回 `ErrorCodeUnknownSystem`(107)（此前是空指针 panic——在 main/业务 goroutine 触发会直接杀进程）。`CreateActorRefEx` 会无条件按传入的 systemId 建引用，合法性由调用方保证。
 
 ## 文件地图
@@ -29,7 +32,7 @@
 | [system.go](system.go) | `ClusterSystem` 接口、`ClusterConfig`/`SystemConfig`、配置校验、消息类型注册与 proto 编解码、集群停机 |
 | [topology.go](topology.go) | 组网角色判定（纯函数）：本节点是否监听、需要主动连接哪些节点 |
 | [router.go](router.go) | 集群 `Router`：寻址哈希、本地/远程分流、Watch/OuterWatch/OuterRequest 的代理转发 |
-| [cluster_net.go](cluster_net.go) | 集群网络层：envelope ↔ proto 包的双向转换、`Send`/`OnMessage`、组网与连接管理 |
+| [cluster_net.go](cluster_net.go) | 集群网络层：envelope ↔ proto 包的双向转换、`Send`/`OnMessage`（含入向引用校验与错误分级）、组网与连接管理 |
 | [cluster_client.go](cluster_client.go) | 主动连接侧：连接、注册握手（带 token 与响应超时）、断线重连循环 |
 | [cluster_server.go](cluster_server.go) | 监听侧：注册鉴权、会话绑定、断线清理、同步感知端口绑定结果 |
 | [watch_proxy.go](watch_proxy.go) | `WatchProxy`（ActorType=12）：跨节点 watch/event 的本地代理，聚合订阅、回源转发、重连刷新 |

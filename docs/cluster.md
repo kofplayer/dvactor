@@ -20,7 +20,7 @@
 
 1. 若本节点不是列表末尾 → 启动 `clusterServer`（[cluster_server.go](../cluster_server.go)）监听本地 Port；
 2. 若本节点不是列表开头 → 对每个前序节点启动 `clusterClient`（[cluster_client.go](../cluster_client.go)）；
-3. **阻塞轮询** `connectedSystemCount >= systemCount`（每 3 秒打印等待日志）后返回 —— 即集群未全员互连前 `Start()` 不会返回。`ClusterConfig.ConnectTimeout > 0` 时超时返回错误；错误经 `ClusterStartError()` 暴露给调用方（`Start()` 本身不返回值，只记日志）。监听端口被占等 bind 失败会立即以错误返回，不再被吞进后台日志。
+3. **轮询等待** `connectedSystemCount >= systemCount`（100ms 间隔，仅在进度变化时打日志）后返回 —— 即集群未全员互连前 `Start()` 不会返回。`ClusterConfig.ConnectTimeout` 的取值：**0（默认）= `DefaultConnectTimeout`(30s)**、>0 = 该值、**<0 = 无限等待**（旧行为）。默认值刻意改成有限：`Host` 写错一个字符或某节点根本没起来时，无限等待会让 `Start()` 永久阻塞、既不报错也不返回。超时经 `ClusterStartError()` 暴露给调用方（`Start()` 本身不返回值，只记日志）。监听端口被占等 bind 失败会立即以错误返回，不再被吞进后台日志。
 
 配置在 `NewSystem` 时校验（本地节点必须在列表中、SystemId 不得重复、多节点必须配置端口），无效配置直接 panic。
 
@@ -42,7 +42,8 @@ client: 收到 Rsp → systemInfo.cli 就绪 → connectedSystemCount+1（等待
 - client 侧：断线回调触发重连循环，**每 5 秒**重试（连接失败/注册失败同样 5 秒退避）。
 - server 侧：断线时清理 session 绑定并 `connectedSystemCount-1`。
 - 发送时对端不在线返回 `ErrorCodeMessageSendFail`（消息直接失败，无缓冲重投）。
-- server 侧因消息处理错误关闭会话时，本侧断线回调必然触发、绑定被同步清理（机制见 [engine.md](engine.md)），对端重连即可恢复，不会出现旧绑定残留导致的永久拒绝。
+- 链路确实被关闭时（帧不可信、读/写超时、对端进程消失），本侧断线回调必然触发、绑定被同步清理（机制见 [engine.md](engine.md)），对端重连即可恢复，不会出现旧绑定残留导致的永久拒绝。
+- `doSend` 在 `info.lock` 临界区内**只取发送器快照**，真正的 socket 写放在锁外：持锁跨写入会让一条慢链路把该系统的重连与绑定清理一起拖住（注册响应的回发同样移出了临界区）。
 - 心跳与读超时见 [protocol.md](protocol.md)：半开连接在 `HeartbeatTimeout` 内被检测并进入重连。
 
 ## 发送路径
@@ -57,7 +58,32 @@ envelope → Router.Router（router.go）
 
 接收路径：`clusterNet.OnMessage` 按 PkgType 反序列化 → 还原 vactor envelope → `localSystem.LocalRouter` 投入本地调度。**注意：入向消息一律走 LocalRouter，不再经过集群 Router**（目标已是本机）。
 
-停机：`dvactor.System.Stop()` 先 `clusterNet.stop()`（终止重连循环、关闭监听与全部会话），再执行 vactor 的 actor 层停机，幂等且在有限时间内返回。
+### 入向引用的信任边界（必读）
+
+线协议里的 `ActorRef` 由对端填写，而 `SystemId`/`GroupSlot` 在 Go 侧是 `uint16`：
+
+- `ActorRefFromProto` 拒绝 `SystemId`/`GroupSlot` 超出 `uint16` 的引用（否则 **65636 会被静默截断成 100**，
+  恰好命中一个真实存在的系统而错投递），也拒绝 `GroupSlot == 0`——框架自建的引用恒为 1..65536，
+  0 说明发送方根本没填（proto3 的空 `ActorRef` 子消息就是这个形状）。
+- 目标引用还要再过 `clusterNet.localTarget`：**SystemId 必须等于本节点**。少了这一层，一条配置漂移
+  或恶意的包会落进 `vactor.group.processEnvelope`，那里的批级 recover 会把**本组当前一整批无关消息**
+  一起丢掉（回归测试 `TestOnMessageForeignSystemIdDropsOnlyThatPacket`、`TestOnMessageBatchPoisonIsIsolated`）。
+- `FromActorRef` 与被 watch 的 `ActorRef` 允许指向别的环境（响应要发回远端），只有 **To 侧**必须落在本机。
+
+### 单包错误不拆链
+
+`OnMessage` 只在"字节流不可信"时向上返回错误（由 engine 拆包层判定：帧长超过 `MaxPacketSize`）。
+**单个信封解不开、消息类型未注册、目标引用非法**都只丢这一条，并记
+`cluster packet msgId=N dropped: ...` 日志。把它们当链路级错误的后果是：漏在某个节点注册一个消息类型，
+就会让整条集群链路反复断开重连（5s 退避 + 最长 10s 注册窗口），期间**所有类型**的消息都在丢——
+滚动升级期间尤其致命。业务处理里的 panic 仍然拆链（该连接状态已不可信），并由
+`clusterNet.dispatchSafely` 带堆栈记日志。
+
+停机：`dvactor.System.Stop()` 与 `StopWithContext(ctx)` 都先 `clusterNet.stop()`（终止重连循环并**等其退出**、关闭监听与全部会话），再执行 vactor 的 actor 层停机，幂等且在有限时间内返回。
+
+- 重连循环退出时会主动 `Disconnect()` 当前连接：早先只发一个停止信号，于是 `Stop()` 返回后 TCP 仍然 OPEN、泄漏的读 goroutine 继续回 Pong，对端把这条链路当作健康并持续向一个已停机进程投递。
+- 每个重连循环最多等 `clientStopTimeout`(5s)；vactor 层的等待用 `StopWithContext` 加时限（在途 handler 可能阻塞）。
+- **必须覆盖 `StopWithContext`**：它来自内嵌的 `vactor.System`，不覆盖就会只停 actor 层、把集群网络留在运行状态（回归测试 `TestClusterStopWithContextAlsoStopsClusterNet`）。
 
 ## 错误码（[error.go](../error.go)）
 
