@@ -1,7 +1,6 @@
 package dvactor
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/kofplayer/vactor"
@@ -10,7 +9,7 @@ import (
 const WatchProxyActorType vactor.ActorType = vactor.ActorTypeStart + 2
 
 func GetWatchProxyActorRef(system vactor.System, systemId vactor.SystemId, watcheeActorRef vactor.ActorRef) vactor.ActorRef {
-	return system.CreateActorRefEx(systemId, WatchProxyActorType, vactor.ActorId(fmt.Sprintf("%v-%v", watcheeActorRef.GetActorType(), watcheeActorRef.GetActorId())))
+	return system.CreateActorRefEx(systemId, WatchProxyActorType, proxyActorId(watcheeActorRef))
 }
 
 func NewWatchProxy() *WatchProxy {
@@ -139,6 +138,13 @@ func (wp *WatchProxy) isWatch(watchType vactor.WatchType) bool {
 }
 
 func (wp *WatchProxy) updateInnerWatch(ctx vactor.EnvelopeContext, watchType vactor.WatchType, isWatch bool, watcher vactor.ActorRef) {
+	if wp.watcheeActorRef == nil {
+		// 代理 id 畸形（见 GetWatcheeActorRef 的解析失败）时无法回源订阅。必须在改动
+		// 订阅表之前拒绝：否则本地记成"已订阅"，而 ctx.Watch(nil) 会被路由层丢弃，
+		// 之后重连刷新也不会再补——订阅静默失效。
+		ctx.LogError("watch proxy %v has no valid watchee, subscription request ignored", ctx.GetActorRef())
+		return
+	}
 	w, isImpl := watcher.(*vactor.ActorRefImpl)
 	if !isImpl {
 		ctx.LogError("watch proxy ignore unsupported ActorRef implementation %T", watcher)
@@ -177,6 +183,15 @@ func (wp *WatchProxy) updateInnerWatch(ctx vactor.EnvelopeContext, watchType vac
 }
 
 func (wp *WatchProxy) updateOuterWatch(ctx vactor.EnvelopeContext, watchType vactor.WatchType, isWatch bool, queue *vactor.Queue[interface{}]) {
+	if queue == nil {
+		ctx.LogError("watch proxy %v received outer watch with nil queue, ignored", ctx.GetActorRef())
+		return
+	}
+	if wp.watcheeActorRef == nil {
+		// 同 updateInnerWatch：没有有效 watchee 就不能登记订阅状态。
+		ctx.LogError("watch proxy %v has no valid watchee, subscription request ignored", ctx.GetActorRef())
+		return
+	}
 	oldIsWatch := wp.isWatch(watchType)
 	queues, ok := wp.queuess[watchType]
 	if isWatch {

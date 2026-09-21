@@ -1,7 +1,6 @@
 package dvactor
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/kofplayer/vactor"
@@ -18,7 +17,7 @@ const RequestProxyTimeout = time.Second * 30
 const requestProxyTimeoutSlack = 5 * time.Second
 
 func GetRequestProxyActorRef(system vactor.System, systemId vactor.SystemId, toActorRef vactor.ActorRef) vactor.ActorRef {
-	return system.CreateActorRefEx(systemId, RequestProxyActorType, vactor.ActorId(fmt.Sprintf("%v-%v", toActorRef.GetActorType(), toActorRef.GetActorId())))
+	return system.CreateActorRefEx(systemId, RequestProxyActorType, proxyActorId(toActorRef))
 }
 
 func NewRequestProxy() *RequestProxy {

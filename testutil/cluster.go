@@ -141,6 +141,11 @@ func (c *Cluster) NodeLogsContain(i int, substr string) bool {
 	return c.systems[i].LogContains(substr)
 }
 
+// NodeLogCount 返回第 i 个节点包含 substr 的日志行数。
+func (c *Cluster) NodeLogCount(i int, substr string) int {
+	return c.systems[i].CountContaining(substr)
+}
+
 // RegisterMessageTypeAll 在所有节点注册同一业务消息类型。
 func (c *Cluster) RegisterMessageTypeAll(msgType uint32, creator func() proto.Message) {
 	for _, n := range c.Nodes {

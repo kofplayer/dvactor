@@ -2,6 +2,8 @@ package dvactor
 
 import (
 	"fmt"
+	"math"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,8 +59,19 @@ func ActorRefToProto(actorRef vactor.ActorRef) *protocol.ActorRef {
 	}
 }
 
+// ActorRefFromProto 把线协议引用还原为框架引用。返回 nil 表示"按目标缺失处理"：
+// 包里没有这个引用，或字段非法（见下）。
+//
+// 线协议用 uint32 承载 SystemId/GroupSlot 是为了将来能放宽 Go 侧类型，但当前
+// vactor.SystemId/GroupSlot 都是 uint16：**静默截断会把 65636 变成 100**，恰好命中
+// 一个真实存在的系统而错投递。因此越界一律判为畸形引用并丢弃。
+// GroupSlot==0 同样非法——框架自建的引用恒为 1..65536，0 意味着发送方根本没填
+// （proto3 的空 ActorRef 子消息就是这个形状）。
 func ActorRefFromProto(actorRef *protocol.ActorRef) vactor.ActorRef {
 	if actorRef == nil {
+		return nil
+	}
+	if actorRef.SystemId > math.MaxUint16 || actorRef.GroupSlot > math.MaxUint16 || actorRef.GroupSlot == 0 {
 		return nil
 	}
 	return &vactor.ActorRefImpl{
@@ -67,6 +80,41 @@ func ActorRefFromProto(actorRef *protocol.ActorRef) vactor.ActorRef {
 		ActorType: vactor.ActorType(actorRef.ActorType),
 		ActorId:   vactor.ActorId(actorRef.ActorId),
 	}
+}
+
+// localTarget 校验"必须由本节点亲自投递"的目标引用（ToActorRef / ToActorRefs 元素）。
+//
+// 这一层校验是必需的：vactor 的 group 在处理信封时会检查 SystemId，但它是按"本地
+// 编程错误"来处理这类异常的。远端字节流给出的引用不受该假设约束——若不加校验，
+// 一个 SystemId 与配置漂移的对端就能让本组当前一整批消息被丢弃。
+// 校验失败时只丢这一条（返回 nil，由 LocalRouter 记日志并丢弃），**不返回 error**，
+// 否则一条畸形包就会拆掉整条集群链路。
+func (cn *clusterNet) localTarget(actorRef *protocol.ActorRef) vactor.ActorRef {
+	ref := ActorRefFromProto(actorRef)
+	if ref == nil {
+		if actorRef != nil {
+			cn.localSystem.LogError("dropping packet: target actor ref from system %v is invalid (slot %v, type %v, id %q)",
+				actorRef.SystemId, actorRef.GroupSlot, actorRef.ActorType, actorRef.ActorId)
+		}
+		return nil
+	}
+	if local := cn.clusterConfig.LocalSystemId; ref.GetSystemId() != local {
+		cn.localSystem.LogError("dropping packet: target system %v != local system %v (cluster configs disagree?), actor %v/%q",
+			ref.GetSystemId(), local, ref.GetActorType(), ref.GetActorId())
+		return nil
+	}
+	return ref
+}
+
+// localTargets 是 localTarget 的批量版本：滤掉非法收件人，全部非法时返回空切片。
+func (cn *clusterNet) localTargets(actorRefs []*protocol.ActorRef) []vactor.ActorRef {
+	refs := make([]vactor.ActorRef, 0, len(actorRefs))
+	for _, r := range actorRefs {
+		if ref := cn.localTarget(r); ref != nil {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
 }
 
 // marshalMessage 包装 MarshalMessage：nil 消息（如"只回错误"的响应）允许跨节点，
@@ -113,6 +161,33 @@ type systemInfo struct {
 	cli     netClient.NetClient
 }
 
+// DefaultConnectTimeout 是等待全员互连的兜底时限（仅在用户没配
+// ClusterConfig.ConnectTimeout 时生效）。
+//
+// 原默认是"无限等待"：Host 写错一个字符、或某个节点根本没起来时，Start() 会永远
+// 阻塞在下面的等待里，既不报错也不返回——本轮写测试时真实踩到（测试包直接挂到
+// go test 超时）。要显式保留无限等待的行为，把 ConnectTimeout 设成负值。
+const DefaultConnectTimeout = 30 * time.Second
+
+// connectWaitTimeout 返回本次启动等待互连的时限；<0 表示无限等待。
+func (cn *clusterNet) connectWaitTimeout() time.Duration {
+	if cn.clusterConfig.ConnectTimeout > 0 {
+		return cn.clusterConfig.ConnectTimeout
+	}
+	if cn.clusterConfig.ConnectTimeout < 0 {
+		return -1
+	}
+	if len(cn.clusterConfig.SystemConfigs) <= 1 {
+		return -1 // 单节点无需互连，直接过
+	}
+	return DefaultConnectTimeout
+}
+
+// connectWaitInterval 是互连进度的轮询间隔。原来固定 3s：既让"早就连上"的情况
+// 平均多等 1.5s，又要在等待期间反复打同一行日志。
+const connectWaitInterval = 100 * time.Millisecond
+
+// start 启动集群网络并等待全员互连。
 func (cn *clusterNet) start() error {
 	cn.localSystem.LogDebug("start cluster")
 	atomic.AddInt32(&cn.connectedSystemCount, 1)
@@ -135,20 +210,28 @@ func (cn *clusterNet) start() error {
 		}
 	}
 
+	timeout := cn.connectWaitTimeout()
 	var deadline time.Time
-	if cn.clusterConfig.ConnectTimeout > 0 {
-		deadline = time.Now().Add(cn.clusterConfig.ConnectTimeout)
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
 	}
+	ticker := time.NewTicker(connectWaitInterval)
+	defer ticker.Stop()
+	lastReported := int32(-1)
 	for {
 		connectedSystemCount := atomic.LoadInt32(&cn.connectedSystemCount)
 		if connectedSystemCount >= int32(cn.systemCount) {
 			break
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
-			return fmt.Errorf("wait cluster connected timeout after %v (%v/%v)", cn.clusterConfig.ConnectTimeout, connectedSystemCount, cn.systemCount)
+			return fmt.Errorf("wait cluster connected timeout after %v (%v/%v)", timeout, connectedSystemCount, cn.systemCount)
 		}
-		cn.localSystem.LogInfo("wait connected %v/%v", connectedSystemCount, cn.systemCount)
-		time.Sleep(time.Second * 3)
+		if connectedSystemCount != lastReported {
+			// 只在进度变化时打一行，避免无限等待把日志刷满
+			cn.localSystem.LogInfo("wait connected %v/%v", connectedSystemCount, cn.systemCount)
+			lastReported = connectedSystemCount
+		}
+		<-ticker.C
 	}
 
 	cn.localSystem.LogInfo("start cluster success")
@@ -156,6 +239,9 @@ func (cn *clusterNet) start() error {
 }
 
 // stop 停止集群网络：终止所有重连循环、关闭监听与已建立的会话（幂等）。
+//
+//	clients 的 Stop 会等各自重连循环退出（有界），保证返回后不再有 goroutine
+//	持有打开的 socket。
 func (cn *clusterNet) stop() {
 	for _, client := range cn.clients {
 		client.Stop()
@@ -163,6 +249,33 @@ func (cn *clusterNet) stop() {
 	if cn.server != nil {
 		cn.server.Stop()
 	}
+}
+
+// messageSender 抽象"主动连接侧(client)"与"被动接入侧(session)"共同的发送入口，
+// 让 doSend 能在锁外调用它。
+type messageSender interface {
+	SendMessage(msgId uint32, data []byte) error
+}
+
+// sender 在锁内只取快照，真正的发送放在锁外由调用方执行。
+//
+// 为什么不能持锁发送：SendMessage 最终落到 TCP writer。对端停止读取时它会耗时更久
+// （有界队列下会立刻返回队满，但停机路径上的 Close 仍要等一把写锁），持 RLock 期间
+// 该系统的重连/绑定清理（要写锁）会一起被拖住——一条慢链路就能阻塞整个方向的自愈。
+// 返回 nil 表示该方向当前没有可用连接。
+func (si *systemInfo) sender() messageSender {
+	si.lock.RLock()
+	defer si.lock.RUnlock()
+	if si.weDial {
+		if si.cli == nil {
+			return nil
+		}
+		return si.cli
+	}
+	if si.session == nil {
+		return nil
+	}
+	return si.session
 }
 
 func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte) vactor.VAError {
@@ -173,24 +286,17 @@ func (cn *clusterNet) doSend(systemId vactor.SystemId, msgId uint32, data []byte
 		cn.localSystem.LogError("system %v is not declared in cluster config", systemId)
 		return vactor.NewVAError(ErrorCodeUnknownSystem)
 	}
-	info.lock.RLock()
-	defer info.lock.RUnlock()
-	var err error
-	if info.weDial {
-		if info.cli != nil {
-			err = info.cli.SendMessage(msgId, data)
-		}
-	} else {
-		if info.session != nil {
-			err = info.session.SendMessage(msgId, data)
-		}
-	}
-	if err != nil {
-		cn.localSystem.LogError("system %v send message error: %v", systemId, err)
+	sender := info.sender()
+	if sender == nil {
+		// 与旧行为一致：未连接按发送失败上报（此前是"发送后补一句 disconnect"，
+		// 结果同一条链路两种日志，且发送与判空分居两处容易再写错）
+		cn.localSystem.LogError("system %v disconnect", systemId)
 		return vactor.NewVAError(ErrorCodeMessageSendFail)
 	}
-	if (info.weDial && info.cli == nil) || (!info.weDial && info.session == nil) {
-		cn.localSystem.LogError("system %v disconnect", systemId)
+	if err := sender.SendMessage(msgId, data); err != nil {
+		// 错误文本自带原因（"send queue is full" / "connection closed"），
+		// 队满说明对端跟不上：这里是唯一的可见点，不能只留一条无上下文的日志
+		cn.localSystem.LogError("system %v send message error: %v", systemId, err)
 		return vactor.NewVAError(ErrorCodeMessageSendFail)
 	}
 	return nil
@@ -364,28 +470,60 @@ func (cn *clusterNet) Send(systemId vactor.SystemId, envelope vactor.Envelope) v
 	return cn.doSend(systemId, msgId, data)
 }
 
+// dispatchSafely 运行业务消息处理，把其中的 panic 转成错误并留日志。
+//
+// 需要这层兜底有两个理由：① 网络读 goroutine 里的 panic 会击穿整个进程；② panic
+// 若只被 engine 层（socket/conn.go 的 safeOnData）吃掉，只会降级成一个 error，而
+// engine 层没有日志设施——堆栈就此丢失，线上再也查不到是谁 panic 的。所以在本层
+// （有 logger 的地方）把堆栈打全，再返回 error 让 engine 走"断这一条链路"的既有
+// 失败路径收尾。返回 error 而非 nil 是因为 panic 之后该连接的状态已不可信。
+func (cn *clusterNet) dispatchSafely(handle func() error, what string, msgId uint32) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cn.localSystem.LogError("%s msgId=%v panic: %v\n%s", what, msgId, r, debug.Stack())
+			err = fmt.Errorf("%s panic: %v", what, r)
+		}
+	}()
+	return handle()
+}
+
+// logDecodeFailure 记录一个被丢弃的业务包。
+//
+// 刻意不把错误返回给 engine：engine 把 OnMessage 的 error 当作"这条链路不可信、
+// 断开"的信号（见 cluster_server.go / client.go 的调用点）。但"本节点没注册这个
+// 消息类型""单个信封解不开"都是**这一条消息**的问题，与链路是否可信无关。
+// 按 error 上抛的旧行为等于让一条不兼容消息拆掉整条集群链路：漏注册一个节点或
+// 滚动升级期间会形成重连风暴（5s 退避 + 10s 注册窗口），期间该链路上的全部消息
+// 都在丢。真正该断链的是帧长不可信——那发生在 engine 的 splitter 层，不经这里。
+func (cn *clusterNet) logDecodeFailure(msgId uint32, err error) {
+	cn.localSystem.LogError("cluster packet msgId=%v dropped: %v", msgId, err)
+}
+
 func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 	switch protocol.PkgType(msgId) {
 	case protocol.PkgType_PkgTypeEnvelopeSend:
 		pkg := &protocol.PkgEnvelopeSend{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		_ = cn.localSystem.LocalRouter(&vactor.EnvelopeSend{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:   cn.localTarget(pkg.ToActorRef),
 			Message:      msg,
 		})
 	case protocol.PkgType_PkgTypeEnvelopeBatchSend:
 		pkg := &protocol.PkgEnvelopeBatchSend{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msgs := make([]interface{}, 0, len(pkg.Messages))
 		for _, protoMsg := range pkg.Messages {
@@ -396,10 +534,7 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 			}
 			msgs = append(msgs, msg)
 		}
-		toActorRefs := make([]vactor.ActorRef, len(pkg.ToActorRefs))
-		for i, key := range pkg.ToActorRefs {
-			toActorRefs[i] = ActorRefFromProto(key)
-		}
+		toActorRefs := cn.localTargets(pkg.ToActorRefs)
 		e := &vactor.EnvelopeBatchSend{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRefs:  toActorRefs,
@@ -410,15 +545,17 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeRequestAsync{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		e := &vactor.EnvelopeRequestAsync{
 			FromActorRef:    ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:      ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:      cn.localTarget(pkg.ToActorRef),
 			Message:         msg,
 			CallbackId:      vactor.CallbackId(pkg.CallbackId),
 			CallbackAddress: pkg.CallbackAddress,
@@ -428,20 +565,22 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeResponseAsync{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		var msg interface{}
 		// 对端可能不填 Response（nil）：此处不能再解引用它，按成功码处理
 		var rspCode protocol.ErrorCode
 		if pkg.Response != nil {
 			if msg, err = cn.unmarshalMessage(pkg.Response.Message); err != nil {
-				return err
+				cn.logDecodeFailure(msgId, err)
+				return nil
 			}
 			rspCode = pkg.Response.ErrorCode
 		}
 		e := &vactor.EnvelopeResponseAsync{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:   cn.localTarget(pkg.ToActorRef),
 			Response: &vactor.Response{
 				Error:   errorCodeToVAError(rspCode),
 				Message: msg,
@@ -454,15 +593,17 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeRequest{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		e := &vactor.EnvelopeRequest{
 			FromActorRef:    ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:      ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:      cn.localTarget(pkg.ToActorRef),
 			Message:         msg,
 			RequestId:       vactor.CallbackId(pkg.RequestId),
 			CallbackAddress: pkg.CallbackAddress,
@@ -472,20 +613,22 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeResponse{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		var msg interface{}
 		// 同上：Response 字段可能缺失，缺失时按成功码还原
 		var rspCode protocol.ErrorCode
 		if pkg.Response != nil {
 			if msg, err = cn.unmarshalMessage(pkg.Response.Message); err != nil {
-				return err
+				cn.logDecodeFailure(msgId, err)
+				return nil
 			}
 			rspCode = pkg.Response.ErrorCode
 		}
 		e := &vactor.EnvelopeResponse{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:   cn.localTarget(pkg.ToActorRef),
 			RequestId:    vactor.CallbackId(pkg.RequestId),
 			Response: &vactor.Response{
 				Error:   errorCodeToVAError(rspCode),
@@ -498,11 +641,12 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeWatch{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		e := &vactor.EnvelopeWatch{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:   cn.localTarget(pkg.ToActorRef),
 			WatchType:    vactor.WatchType(pkg.WatchType),
 			IsWatch:      pkg.IsWatch,
 		}
@@ -511,16 +655,15 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeNotify{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
-		toActorRefs := make([]vactor.ActorRef, len(pkg.ToActorRefs))
-		for i, key := range pkg.ToActorRefs {
-			toActorRefs[i] = ActorRefFromProto(key)
-		}
+		toActorRefs := cn.localTargets(pkg.ToActorRefs)
 		e := &vactor.EnvelopeNotify{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
 			ToActorRefs:  toActorRefs,
@@ -536,15 +679,17 @@ func (cn *clusterNet) OnMessage(msgId uint32, data []byte) error {
 		pkg := &protocol.PkgEnvelopeFireNotify{}
 		err := proto.Unmarshal(data, pkg)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		msg, err := cn.unmarshalMessage(pkg.Message)
 		if err != nil {
-			return err
+			cn.logDecodeFailure(msgId, err)
+			return nil
 		}
 		e := &vactor.EnvelopeFireNotify{
 			FromActorRef: ActorRefFromProto(pkg.FromActorRef),
-			ToActorRef:   ActorRefFromProto(pkg.ToActorRef),
+			ToActorRef:   cn.localTarget(pkg.ToActorRef),
 			NotifyType:   vactor.NotifyType(pkg.NotifyType),
 			WatchType:    vactor.WatchType(pkg.WatchType),
 			Message:      msg,

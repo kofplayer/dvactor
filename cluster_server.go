@@ -69,25 +69,30 @@ func (svr *clusterServer) OnMessage(s netSession.NetSession, msgId uint32, data 
 			// 该节点本应由本节点主动去连：若它反过来连进来，说明两侧配置的方向不一致
 			return fmt.Errorf("systemId %v should be dialed by us, not register to us", req.SystemId)
 		}
+		rsp := &protocol.PkgRegisterSystemRsp{
+			ErrorCode: protocol.ErrorCode_ErrorCodeSuccess,
+		}
+		rspData, err := proto.Marshal(rsp)
+		if err != nil {
+			return err
+		}
 		info.lock.Lock()
-		defer info.lock.Unlock()
 		if info.session != nil {
+			info.lock.Unlock()
 			return fmt.Errorf("systemId %v already registered", req.SystemId)
 		}
 		info.session = s
 		s.SetBindObject(info)
 		atomic.AddInt32(&svr.cn.connectedSystemCount, 1)
-		rsp := &protocol.PkgRegisterSystemRsp{
-			ErrorCode: protocol.ErrorCode_ErrorCodeSuccess,
-		}
-		data, err := proto.Marshal(rsp)
-		if err != nil {
-			return err
-		}
+		info.lock.Unlock()
+
+		// 以下都在锁外：s.SendMessage 会走 TCP writer，onSystemReconnected 会向本机
+		// 各 group 投递刷新消息。放在 info.lock 临界区里，一条慢链路或一次队列拥塞就能
+		// 把该系统的重连与绑定清理一起拖住（doSend 拿的是同一把锁的读锁）。
 		svr.cn.localSystem.LogInfo("system %v connected", req.SystemId)
 		// 对端重新注册意味着连接经历过断开：触发本机代理 watch 刷新
 		svr.cn.localSystem.onSystemReconnected(info.config.SystemId)
-		_ = s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), data)
+		_ = s.SendMessage(uint32(protocol.PkgType_PkgTypeRegisterSystemRsp), rspData)
 		return nil
 	default:
 		return svr.cn.OnMessage(msgId, data)
@@ -129,12 +134,21 @@ func NewServer(cn *clusterNet) *clusterServer {
 	// ListenHost 为空时监听所有网卡（保持旧行为）
 	svr.acceptor.SetAddress(cn.systemInfos[cn.clusterConfig.LocalSystemId].config.ListenHost, port)
 	svr.svr.SetAcceptor(svr.acceptor)
+	// 会话数上限：集群拓扑是静态的、全互联，本节点最多应有 (节点数-1) 条入站会话；
+	// 留 4 倍余量给"旧链路尚未超时 + 新链路已接入"的重连重叠窗口。没有上限时，
+	// 端口扫描或未注册的握手可以让 session 表与 fd 无界增长（回收要等 60s 读超时）。
+	svr.svr.SetMaxSessions(4 * len(cn.clusterConfig.SystemConfigs))
+	svr.svr.SetOnReject(func(remoteAddr string, limit int) {
+		svr.cn.localSystem.LogError("reject cluster connection from %v: %d sessions already registered",
+			remoteAddr, limit)
+	})
 	svr.svr.SetOnConnect(svr.OnConnect)
 	svr.svr.SetOnDisconnect(func(s netSession.NetSession) {
 		svr.OnDisconnect(s)
 	})
 	svr.svr.SetOnMessage(func(s netSession.NetSession, msgId uint32, data []byte) error {
-		err := svr.OnMessage(s, msgId, data)
+		err := svr.cn.dispatchSafely(func() error { return svr.OnMessage(s, msgId, data) },
+			"cluster server onMessage", msgId)
 		if err != nil {
 			svr.cn.localSystem.LogError("on message error: %v", err)
 			// 出错即断开该会话；连接关闭后 server/client 双侧绑定均会被清理，

@@ -557,9 +557,14 @@ func TestClusterUnreachableNodeSendFail(t *testing.T) {
 	}
 }
 
-// 回归测试（report 2026-08-30 附录 P0）：对端无法反序列化的消息会触发 server 关闭
-// 会话；修复后本侧 OnDisconnect 正常触发、绑定被清理，client 按退避重连恢复。
-func TestClusterUnknownMessageTypeDropsSessionAndReconnects(t *testing.T) {
+// 一条本节点解不开的消息（未注册的消息类型）只能丢这一条，不能拆链。
+//
+// 旧行为是把它当链路级错误上报 → engine 关闭该会话 → client 重连（5s 退避 + 最长
+// 10s 注册窗口）。于是"漏在一个节点注册消息类型"这种单点配置问题，会让整条集群
+// 链路反复断开，期间**所有类型**的消息都在丢；滚动升级期间尤其致命。
+// 该用例锁定的正是新契约：链路保持连接、毒包被丢弃并留下可排查的日志、其余流量
+// 不经过任何重连就继续可用。
+func TestClusterUnknownMessageTypeDropsPacketNotLink(t *testing.T) {
 	cl := dtu.StartCluster(t, []dtu.NodeSpec{
 		{ // node1：server 侧，echo 只在此声明（放置确定），不注册 Int32Value
 			ActorTypes: []vactor.ActorType{clusterEchoType},
@@ -576,28 +581,35 @@ func TestClusterUnknownMessageTypeDropsSessionAndReconnects(t *testing.T) {
 	n2 := cl.Node(1)
 
 	// 正常请求先确认链路可用
-	rsp, err := n2.Request(n2.CreateActorRef(clusterEchoType, "e"), newStrValMsg("warm"), clusterTestTimeout)
-	if err != nil {
+	if _, err := n2.Request(n2.CreateActorRef(clusterEchoType, "e"), newStrValMsg("warm"), clusterTestTimeout); err != nil {
 		t.Fatalf("warmup request: %v", err)
 	}
-	_ = rsp
+	disconnectsBefore := cl.NodeLogCount(0, "disconnected")
 
-	// node2 发送 node1 无法反序列化的消息 → node1 关闭会话
+	// node2 发送 node1 无法反序列化的消息
 	n2.Send(n2.CreateActorRef(clusterEchoType, "e"), newIntValMsg(1))
-	vt.WaitFor(t, 5*time.Second, "session dropped on node1", func() bool {
-		return cl.NodeLogsContain(0, "disconnected")
+
+	// 必须留下丢弃记录（否则"没断链"只是因为消息根本没发出去）
+	// 用本层特有的前缀断言，避免匹配到 vactor 的 "envelope dropped" 之类的无关日志
+	vt.WaitFor(t, 5*time.Second, "poison packet logged as dropped on node1", func() bool {
+		return cl.NodeLogsContain(0, "cluster packet")
 	})
 
-	// client 约 5 秒后重连，链路恢复
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		rsp, err := n2.Request(n2.CreateActorRef(clusterEchoType, "e"), newStrValMsg("after"), 2*time.Second)
-		if err == nil && rsp.(*wrapperspb.StringValue).GetValue() == "echo:after" {
-			return // 重连成功
-		}
-		time.Sleep(300 * time.Millisecond)
+	// 链路不得断开：留出足够时间让旧的"拆链"行为暴露
+	time.Sleep(1 * time.Second)
+	if got := cl.NodeLogCount(0, "disconnected"); got > disconnectsBefore {
+		t.Fatalf("cluster link was torn down by an undecodable packet (%d -> %d disconnect logs)",
+			disconnectsBefore, got)
 	}
-	t.Fatal("cluster did not recover after session drop")
+
+	// 紧随其后的正常流量必须立刻可用，不需要等重连
+	rsp, err := n2.Request(n2.CreateActorRef(clusterEchoType, "e"), newStrValMsg("after"), 2*time.Second)
+	if err != nil {
+		t.Fatalf("request after a dropped packet must not need a reconnect: %v", err)
+	}
+	if rsp.(*wrapperspb.StringValue).GetValue() != "echo:after" {
+		t.Fatalf("unexpected response %v", rsp)
+	}
 }
 
 // 跨节点超时：对端 actor 永不响应时，外层 Request 按调用方超时返回 ErrorCodeTimeout。
