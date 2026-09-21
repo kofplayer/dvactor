@@ -1,6 +1,7 @@
 package dvactor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -97,7 +98,10 @@ type SystemConfig struct {
 type ClusterConfig struct {
 	LocalSystemId vactor.SystemId
 	SystemConfigs []*SystemConfig
-	// ConnectTimeout: 启动时等待集群全员互连的超时时间；0 表示无限等待（保持旧行为）。
+	// ConnectTimeout: 启动时等待集群全员互连的超时时间。
+	// 0（未设置）= 用 DefaultConnectTimeout（30s）：配错 Host、或某个节点根本没起来
+	// 时，Start() 会带着 ClusterStartError 返回，而不是永久阻塞。
+	// 负值 = 无限等待（旧行为，仅在你确实想让启动卡住时用）。
 	ConnectTimeout time.Duration
 	// AuthToken 注册握手共享密钥：非空时，注册请求必须携带相同 token 才会被接受，
 	// 防止任意进程冒充节点接入。token 明文传输，仅作准入校验不提供机密性，
@@ -148,6 +152,21 @@ func (s *system) Stop() {
 		s.clusterNet.stop()
 	})
 	s.System.Stop()
+}
+
+// StopWithContext 覆盖内嵌 vactor.System 的实现。
+//
+// 必须覆盖：内嵌版本只停 actor 层，绕过它会留下集群网络——重连循环继续跑、
+// 已建立的会话继续收发，等于一个还在对外收包的"已停机"节点。
+// 停机顺序与 Stop 一致：先集群网络，再按 ctx 的时限等 actor 层收尾。
+//
+// 注意 ctx 只约束 actor 层的等待：集群网络自身的关闭另有上界（每个重连循环
+// 最多 clientStopTimeout），因为那部分等待已经是有限值，无需再叠一层。
+func (s *system) StopWithContext(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		s.clusterNet.stop()
+	})
+	return s.System.StopWithContext(ctx)
 }
 
 // onSystemReconnected 在与远端系统的连接重新建立后调用（client 侧注册成功、
