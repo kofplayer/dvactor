@@ -3,6 +3,7 @@ package netConnect_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	netConnect "github.com/kofplayer/dvactor/engine/net/connect"
@@ -208,5 +209,33 @@ func TestSplitterRejectsOversizedFrame(t *testing.T) {
 				t.Fatalf("dataLen %d should return error", tt.dataLen)
 			}
 		})
+	}
+}
+
+// 帧长上限必须在**发送侧**也生效：只靠接收侧检查的话，一条超限消息会在本地
+// "打包成功"，到对端却被判成不可信的字节流而拆掉整条链路——一条大消息就能永久拆链。
+// 同时长度字段只有 4 字节，>4GB 的载荷会被 uint32 静默截断成畸形帧头。
+func TestPackMessageRejectsOversizedPayload(t *testing.T) {
+	// 上限 + 1 字节的载荷：约 64MB 的一次性分配，只测边界、不做内容写入
+	oversized := make([]byte, netConnect.MaxPacketSize+1)
+	if _, err := netConnect.PackMessage(1, oversized); err == nil {
+		t.Fatal("payload above MaxPacketSize must be rejected on the send side")
+	} else if !errors.Is(err, netConnect.ErrPacketTooLarge) {
+		t.Fatalf("error = %v, want ErrPacketTooLarge", err)
+	}
+
+	// 恰好等于上限仍然允许（边界不能被写成 <）
+	atLimit := oversized[:netConnect.MaxPacketSize]
+	pkt, err := netConnect.PackMessage(1, atLimit)
+	if err != nil {
+		t.Fatalf("payload exactly at MaxPacketSize must be accepted: %v", err)
+	}
+	if binary.BigEndian.Uint32(pkt[:4]) != uint32(netConnect.MaxPacketSize) {
+		t.Fatal("frame length header mismatch at the boundary")
+	}
+
+	// msgId 越界依旧报错（防静默截断）
+	if _, err := netConnect.PackMessage(netConnect.MaxMsgId+1, []byte("x")); err == nil {
+		t.Fatal("msgId above 1 byte must be rejected")
 	}
 }

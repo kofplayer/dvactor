@@ -19,6 +19,10 @@ type NetServer interface {
 	Start() error
 	Stop() error
 	GetSessionMgr() netSession.SessionMgr
+	// SetMaxSessions 限制同时登记的会话数，0 表示不限制。
+	SetMaxSessions(n int)
+	// SetOnReject 设置"因触到上限而拒绝新连接"的回调，供上层记日志。
+	SetOnReject(f func(remoteAddr string, limit int))
 }
 
 type netServer struct {
@@ -27,7 +31,16 @@ type netServer struct {
 	onDisconnect func(netSession.NetSession)
 	onMessage    func(s netSession.NetSession, t uint32, data []byte) error
 	sessionMgr   netSession.SessionMgr
+	// maxSessions 会话数上限，0 = 不限制。accept 即登记会话，未鉴权/未注册的连接
+	// 也要到 HeartbeatTimeout（默认 60s）才被回收，没有上限时端口扫描可以让
+	// session map 与 fd 无界膨胀。
+	maxSessions int
+	onReject    func(remoteAddr string, limit int)
 }
+
+func (ns *netServer) SetMaxSessions(n int) { ns.maxSessions = n }
+
+func (ns *netServer) SetOnReject(f func(remoteAddr string, limit int)) { ns.onReject = f }
 
 func (ns *netServer) SetAcceptor(acceptor netConnect.Acceptor) {
 	ns.acceptor = acceptor
@@ -47,6 +60,15 @@ func (ns *netServer) SetOnMessage(onMessage func(s netSession.NetSession, t uint
 
 func (ns *netServer) Start() error {
 	ns.acceptor.SetOnAccept(func(conn netConnect.Conn) {
+		if ns.maxSessions > 0 && ns.sessionMgr.Count() >= ns.maxSessions {
+			// 拒绝而不是登记：不占 session 表，也不起收发 goroutine。
+			// Disconnect 现在保证关掉 fd（只关队列会留下半死连接）。
+			if ns.onReject != nil {
+				ns.onReject(conn.RemoteAddr(), ns.maxSessions)
+			}
+			_ = conn.Disconnect()
+			return
+		}
 		s := ns.sessionMgr.NewSession()
 		s.SetConn(conn)
 		var splitter netConnect.PacketSplitter
