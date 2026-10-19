@@ -10,9 +10,8 @@ import (
 
 // stubAcceptor 把 onAccept 暴露给测试，无需真起监听器。
 type stubAcceptor struct {
-	mu     sync.Mutex
-	onAcc  netConnect.OnAcceptFunc
-	starts int
+	mu    sync.Mutex
+	onAcc netConnect.OnAcceptFunc
 }
 
 func (a *stubAcceptor) SetOnAccept(f netConnect.OnAcceptFunc) {

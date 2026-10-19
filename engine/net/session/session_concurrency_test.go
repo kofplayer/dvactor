@@ -8,7 +8,7 @@ import (
 	netSession "github.com/kofplayer/dvactor/engine/net/session"
 )
 
-type raceConn struct{ mu sync.Mutex }
+type raceConn struct{}
 
 func (c *raceConn) RemoteAddr() string { return "x" }
 func (c *raceConn) Disconnect() error  { return nil }
