@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	netConnect "github.com/kofplayer/dvactor/engine/net/connect"
@@ -19,7 +20,13 @@ type AcceptorSocket struct {
 	onListenFunc func(error)
 	host         string
 	port         uint16
-	listener     net.Listener
+
+	// mu 保护 listener：Start 在监听 goroutine 里写它，Stop 通常在另一个
+	// goroutine 里读它并关闭。没有这把锁时二者构成数据竞争（-race 直接报
+	// "Read at Stop / Previous write at Start"），而且 Stop 可能读到尚未赋值
+	// 的 nil 而漏关监听器，留下一个再也没人能停的 accept 循环。
+	mu       sync.Mutex
+	listener net.Listener
 }
 
 // SetOnListen 设置监听结果回调：Start 后回调一次，err 为 nil 表示已成功监听
@@ -64,16 +71,18 @@ func acceptErrorIsTransient(err error) bool {
 }
 
 func (as *AcceptorSocket) Start() error {
-	var err error
-	as.listener, err = net.Listen("tcp", as.host+":"+strconv.Itoa(int(as.port)))
+	ln, err := net.Listen("tcp", as.host+":"+strconv.Itoa(int(as.port)))
 	if err != nil {
 		as.notifyListen(err)
 		return err
 	}
+	as.mu.Lock()
+	as.listener = ln
+	as.mu.Unlock()
 	as.notifyListen(nil)
 	backoff := acceptRetryMin
 	for {
-		conn, err := as.listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			if !acceptErrorIsTransient(err) {
 				return err
@@ -109,10 +118,25 @@ func (as *AcceptorSocket) Start() error {
 }
 
 func (as *AcceptorSocket) Stop() error {
-	if as.listener != nil {
-		_ = as.listener.Close()
+	as.mu.Lock()
+	ln := as.listener
+	as.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
 	}
 	return nil
+}
+
+// addr 返回已绑定监听器的地址；未开始监听时返回 nil。
+// 测试要连"Start 之后真正的端口"（SetAddress 传 0 时端口由内核分配），
+// 直接读 listener 字段会与 Start 的写入构成数据竞争。
+func (as *AcceptorSocket) addr() net.Addr {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	if as.listener == nil {
+		return nil
+	}
+	return as.listener.Addr()
 }
 
 func (as *AcceptorSocket) SetOnAccept(onAcceptFunc netConnect.OnAcceptFunc) {

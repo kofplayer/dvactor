@@ -65,7 +65,7 @@ func startAcceptor(t *testing.T) (*AcceptorSocket, int, *serverCapture) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("acceptor did not report listen result")
 	}
-	addr := acc.listener.Addr().(*net.TCPAddr)
+	addr := acc.addr().(*net.TCPAddr)
 	t.Cleanup(func() { _ = acc.Stop() })
 	return acc, addr.Port, cap
 }

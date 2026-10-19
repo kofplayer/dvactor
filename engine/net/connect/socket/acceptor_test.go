@@ -94,7 +94,7 @@ func TestAcceptWithoutCallbackClosesConnection(t *testing.T) {
 	}
 	defer func() { _ = acc.Stop() }()
 
-	conn, err := net.Dial("tcp", acc.listener.Addr().String())
+	conn, err := net.Dial("tcp", acc.addr().String())
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

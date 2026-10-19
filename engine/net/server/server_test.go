@@ -42,9 +42,23 @@ func startServerClient(t *testing.T) (chan frame, chan frame, chan struct{}, net
 	srv.SetOnDisconnect(func(s netSession.NetSession) {
 		srvDisconnected <- struct{}{}
 	})
+	started := make(chan error, 1)
 	go func() {
-		_ = srv.Start() // Accept 循环阻塞；端口已预分配，失败会表现为连接失败
+		// Accept 循环阻塞；端口已预分配，失败会表现为连接失败
+		started <- srv.Start()
 	}()
+	// 必须在测试结束前停掉监听循环：残留的 accept goroutine 会继续读包级配置
+	// （newConn 每次 accept 都读 HeartbeatInterval/WriteTimeout），与后续测试写这些
+	// 变量构成数据竞争。-race 下表现为 "Write at ... by TestX / Previous read at
+	// ... by acceptor.Start" 的跨测试报告。
+	t.Cleanup(func() {
+		_ = srv.Stop()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Error("accept loop did not exit after Stop")
+		}
+	})
 
 	cli := netclient.NewNetClient()
 	conn := socketNetConnect.NewConnector()
@@ -124,7 +138,18 @@ func TestSocketHandlerErrorClosesSession(t *testing.T) {
 		}
 		return nil
 	})
-	go func() { _ = srv.Start() }()
+	started := make(chan error, 1)
+	go func() { started <- srv.Start() }()
+	// 同 startServerClient：监听循环必须随测试一起收掉，否则它会跨测试存活并
+	// 继续读包级配置，和后面的心跳测试写配置构成数据竞争。
+	t.Cleanup(func() {
+		_ = srv.Stop()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Error("accept loop did not exit after Stop")
+		}
+	})
 
 	cliDisconnected := make(chan struct{}, 4)
 	cli := netclient.NewNetClient()
